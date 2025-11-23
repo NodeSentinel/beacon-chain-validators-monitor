@@ -49,11 +49,10 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@tsconfig/node20": "^20.1.4",
     "@types/lodash": "^4.14.200",
     "@types/memoizee": "^0.4.11",
     "@types/ms": "^2.1.0",
-    "@types/node": "^20.14.2",
+    "@types/node": "^22.17.2",
     "@typescript-eslint/eslint-plugin": "^8.5.0",
     "@vitest/coverage-v8": "^3.2.4",
     "dotenv-cli": "^7.4.2",

@@ -40,11 +40,16 @@ The code is written in TypeScript and uses XState to orchestrate the data fetchi
    ```
 
 3. **Environment setup**
-
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
+   - Create root `.env` for Docker infrastructure (PostgreSQL variables). Example:
+     ```bash
+     cp .env.example .env
+     # Edit .env with your local PostgreSQL credentials
+     ```
+   - Create per-package env files for runtime:
+     - `packages/fetch/.env` (service runtime)
+     - `packages/telegram-bot/.env` (bot runtime)
+     - `packages/telegram-mini-app/.env.local` (Next.js dev)
+   - See "Environment variables" below for full templates.
 
 4. **Start the services**
    ```bash
@@ -60,6 +65,86 @@ The code is written in TypeScript and uses XState to orchestrate the data fetchi
 - pnpm migrate:dev
 - pnpm build
 - pnpm dev:fetch
+
+## Environment variables
+
+### Root (.env)
+
+Used by `docker-compose.yml` and scripts to construct `DATABASE_URL`. Do not put app secrets here.
+
+```bash
+# PostgreSQL Infrastructure
+POSTGRES_USER=beacon_user
+POSTGRES_PASSWORD=your_secure_password_here
+POSTGRES_DB=beacon_indexer
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+
+# Docker flag
+DOCKER_ENV=false
+```
+
+### packages/fetch/.env
+
+Runtime variables for the fetch service.
+
+```bash
+# Database
+DATABASE_URL="postgresql://beacon_user:your_secure_password_here@localhost:5432/beacon_indexer?schema=public"
+
+# Blockchain
+CHAIN="gnosis"
+CONSENSUS_LOOKBACK_SLOT=0
+CONSENSUS_ARCHIVE_API_URL="https://archive-node.example.com"
+CONSENSUS_FULL_API_URL="https://full-node.example.com"
+CONSENSUS_API_REQUEST_PER_SECOND=10
+
+# Execution Layer
+EXECUTION_API_URL="https://execution-api.example.com"
+EXECUTION_API_KEY=""
+EXECUTION_API_BKP_URL="https://backup-execution-api.example.com"
+EXECUTION_API_BKP_KEY=""
+EXECUTION_API_REQUEST_PER_SECOND=10
+
+# Logging
+LOG_OUTPUT="console"
+LOG_LEVEL="info"
+TZ="UTC"
+```
+
+### packages/telegram-bot/.env
+
+Runtime variables for the Telegram bot.
+
+```bash
+# Database
+DATABASE_URL="postgresql://beacon_user:your_secure_password_here@localhost:5432/beacon_indexer?schema=public"
+
+# Bot Configuration
+BOT_TOKEN="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
+BOT_MODE="polling" # or 'webhook'
+BOT_ALLOWED_UPDATES="[]"
+BOT_ADMINS="[]"
+
+# Webhook mode only
+# BOT_WEBHOOK="https://your-domain.com/webhook"
+# BOT_WEBHOOK_SECRET="your_webhook_secret_min_12_chars"
+# SERVER_HOST="0.0.0.0"
+# SERVER_PORT="80"
+
+# Logging
+DEBUG="false"
+LOG_LEVEL="info"
+```
+
+### packages/telegram-mini-app/.env.local
+
+Next.js conventions: `.env.local` for local development. Only `NEXT_PUBLIC_*` are exposed to the browser.
+
+```bash
+NEXT_PUBLIC_API_URL="http://localhost:3000/api"
+NEXT_PUBLIC_BOT_USERNAME="YourBotUsername"
+```
 
 ## Architecture
 

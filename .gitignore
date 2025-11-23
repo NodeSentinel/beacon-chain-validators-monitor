@@ -21,6 +21,8 @@ migration_lock.toml
 # Environment files
 .env*
 !.env.example
+!.env.local.example
+!.env.*.example
 
 # IDE and editor files
 .vscode/

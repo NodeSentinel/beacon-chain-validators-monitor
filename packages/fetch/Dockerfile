@@ -1,35 +1,33 @@
-FROM node:18-alpine
+FROM node:22-alpine
 
-# Install system dependencies first
-RUN apk add --no-cache openssl
+# Install system dependencies (openssl for Prisma, tzdata for timezone support)
+RUN apk add --no-cache openssl tzdata
 
 # Install pnpm globally
 RUN npm install -g pnpm
 
 WORKDIR /app
 
-# Copy package management files first
+# Copy package management files first (for caching)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
-# Copy only the required script
-COPY scripts/setDbUrl.js ./scripts/setDbUrl.js
-
-# Copy db package files
+# Copy only package.json and tsconfig for each package (minimal files needed for install)
 COPY packages/db/package.json ./packages/db/package.json
 COPY packages/db/tsconfig.json ./packages/db/tsconfig.json
-COPY packages/db/src ./packages/db/src
-COPY packages/db/prisma ./packages/db/prisma
-
-# Copy fetch package files
 COPY packages/fetch/package.json ./packages/fetch/package.json
 
-# Install dependencies
+# Copy Prisma schema (needed for prisma generate during postinstall, but we skip it)
+COPY packages/db/prisma ./packages/db/prisma
+
+# Install dependencies (this layer will be cached unless package files change)
 # Disable automatic Prisma generation during install
 ENV PRISMA_SKIP_POSTINSTALL_GENERATE=true
 RUN pnpm install --frozen-lockfile
 
-# Copy source code
+# Now copy source code (changes here won't invalidate the install cache)
+COPY packages/db/src ./packages/db/src
 COPY packages/fetch ./packages/fetch
+COPY scripts/setDbUrl.js ./scripts/setDbUrl.js
 
 # Generate Prisma client from db package
 RUN pnpx prisma generate --schema=./packages/db/prisma/schema.prisma

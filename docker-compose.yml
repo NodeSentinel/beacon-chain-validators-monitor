@@ -18,7 +18,7 @@ services:
       - app-network
 
   migrate:
-    image: node:18-alpine
+    image: node:22-alpine
     platform: linux/arm64
     working_dir: /app
     volumes:
@@ -42,17 +42,37 @@ services:
     networks:
       - app-network
 
-  beacon-fetch:
+  indexer:
     container_name: fetch
     restart: on-failure
     env_file:
       - .env
+      - packages/fetch/.env
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       - DOCKER_ENV=true
     build:
       context: .
       dockerfile: packages/fetch/Dockerfile
+      platforms:
+        - linux/arm64
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - app-network
+
+  telegram_bot:
+    container_name: telegram_bot
+    restart: on-failure
+    env_file:
+      - .env
+      - packages/telegram-bot/.env
+    environment:
+      - DOCKER_ENV=true
+    build:
+      context: .
+      dockerfile: packages/telegram-bot/Dockerfile
       platforms:
         - linux/arm64
     depends_on:
