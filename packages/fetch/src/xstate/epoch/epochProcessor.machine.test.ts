@@ -6,7 +6,7 @@ import { createControllablePromise } from '@/src/__tests__/utils.js';
 import { EpochController } from '@/src/services/consensus/controllers/epoch.js';
 import { SlotController } from '@/src/services/consensus/controllers/slot.js';
 import { ValidatorsController } from '@/src/services/consensus/controllers/validators.js';
-import { BeaconTime } from '@/src/services/consensus/utils/time.js';
+import { BeaconTime } from '@/src/services/consensus/utils/beaconTime.js';
 import { epochProcessorMachine } from '@/src/xstate/epoch/epochProcessor.machine.js';
 
 // ============================================================================
@@ -118,28 +118,11 @@ function createMockBeaconTime() {
 function createDefaultInput(
   epoch: number,
   overrides?: {
-    epochDBSnapshot?: Partial<{
-      validatorsBalancesFetched: boolean;
-      rewardsFetched: boolean;
-      committeesFetched: boolean;
-      slotsFetched: boolean;
-      syncCommitteesFetched: boolean;
-      validatorsActivationFetched: boolean;
-    }>;
     beaconTime?: BeaconTime;
   },
 ) {
   return {
     epoch,
-    epochDBSnapshot: {
-      validatorsBalancesFetched: false,
-      rewardsFetched: false,
-      committeesFetched: false,
-      slotsFetched: false,
-      syncCommitteesFetched: false,
-      validatorsActivationFetched: false,
-      ...overrides?.epochDBSnapshot,
-    },
     config: {
       slotDuration: SLOT_DURATION,
       lookbackSlot: SLOT_START_INDEXING,
@@ -229,20 +212,14 @@ describe('epochProcessorMachine', () => {
         },
       );
 
+      // Initial state should be checkingCanProcess
+      expect(stateTransitions[0]).toBe('checkingCanProcess');
+
+      // After timers run, we should move to waitingForEpochStart
       vi.runOnlyPendingTimers();
       await Promise.resolve();
 
-      expect(stateTransitions[0]).toBe('checkingCanProcess');
-      expect(stateTransitions[1]).toBe('waiting');
-
-      vi.advanceTimersByTime(SLOT_DURATION * 2);
-      await Promise.resolve();
-
-      // Should keep cycling between checking and waiting
-      const hasChecking = stateTransitions.includes('checkingCanProcess');
-      const hasWaiting = stateTransitions.includes('waiting');
-      expect(hasChecking).toBe(true);
-      expect(hasWaiting).toBe(true);
+      expect(stateTransitions[1]).toBe('waitingForEpochStart');
 
       actor.stop();
       subscription.unsubscribe();
@@ -255,10 +232,13 @@ describe('epochProcessorMachine', () => {
         createDefaultInput(100),
       );
 
+      // Initial snapshot should be checkingCanProcess
+      expect(stateTransitions[0]).toBe('checkingCanProcess');
+
       vi.runOnlyPendingTimers();
       await Promise.resolve();
 
-      expect(stateTransitions[0]).toBe('checkingCanProcess');
+      // Next snapshot should be epochProcessing
       expect(typeof stateTransitions[1]).toBe('object');
       expect(stateTransitions[1]).toHaveProperty('epochProcessing');
 
@@ -269,20 +249,19 @@ describe('epochProcessorMachine', () => {
 
   describe('epochProcessing', () => {
     describe('monitoringEpochStart', () => {
-      test('epoch already started, should go directly to complete', async () => {
+      test('epoch already started, should go directly to epochStarted', async () => {
         vi.setSystemTime(new Date(EPOCH_101_START_TIME + 50));
 
         const { actor, stateTransitions, subscription } = createAndStartActor(
           createDefaultInput(100),
         );
 
-        vi.runOnlyPendingTimers();
-        await Promise.resolve();
+        await vi.runAllTimersAsync();
 
         // Get last epochProcessing state
         const lastState = getLastState(stateTransitions);
         const monitoringState = getNestedState(lastState, 'epochProcessing.monitoringEpochStart');
-        expect(monitoringState).toBe('complete');
+        expect(monitoringState).toBe('epochStarted');
 
         actor.stop();
         subscription.unsubscribe();
@@ -295,25 +274,54 @@ describe('epochProcessorMachine', () => {
           createDefaultInput(100),
         );
 
-        vi.runOnlyPendingTimers();
-        await Promise.resolve();
+        await vi.runAllTimersAsync();
 
-        // Should be in waiting state
-        let lastState = getLastState(stateTransitions);
-        let monitoringState = getNestedState(lastState, 'epochProcessing.monitoringEpochStart');
-        expect(monitoringState).toBe('waiting');
+        // Collect monitoring substate transitions
 
-        // Advance time to epoch start
-        vi.setSystemTime(new Date(EPOCH_100_START_TIME + 50));
-        vi.advanceTimersByTime(150);
-        await Promise.resolve();
-        vi.runOnlyPendingTimers();
-        await Promise.resolve();
+        const monitoringStates = stateTransitions
+          .map((s: any) => getNestedState(s, 'epochProcessing.monitoringEpochStart'))
+          .filter((s) => s !== null);
 
-        // Should now be complete
-        lastState = getLastState(stateTransitions);
-        monitoringState = getNestedState(lastState, 'epochProcessing.monitoringEpochStart');
-        expect(monitoringState).toBe('complete');
+        const waitingIndex = monitoringStates.indexOf('waitingForEpochStart');
+        const startedIndex = monitoringStates.indexOf('epochStarted');
+
+        expect(waitingIndex).toBeGreaterThanOrEqual(0);
+        expect(startedIndex).toBeGreaterThan(waitingIndex);
+
+        actor.stop();
+        subscription.unsubscribe();
+      });
+
+      test('epoch start respects delaySlotsToHead (waits until effective start)', async () => {
+        const beaconTimeWithDelay = new BeaconTime({
+          genesisTimestamp: GENESIS_TIMESTAMP,
+          slotDurationMs: SLOT_DURATION,
+          slotsPerEpoch: SLOTS_PER_EPOCH,
+          epochsPerSyncCommitteePeriod: EPOCHS_PER_SYNC_COMMITTEE_PERIOD,
+          lookbackSlot: SLOT_START_INDEXING,
+          delaySlotsToHead: 4,
+        });
+
+        // Time is after nominal epoch start but before effective start (startSlot + delay)
+        vi.setSystemTime(new Date(EPOCH_100_START_TIME + SLOT_DURATION));
+
+        const { actor, stateTransitions, subscription } = createAndStartActor(
+          createDefaultInput(100, { beaconTime: beaconTimeWithDelay }),
+        );
+
+        await vi.runAllTimersAsync();
+
+        // Collect monitoring substate transitions
+
+        const monitoringStates = stateTransitions
+          .map((s: any) => getNestedState(s, 'epochProcessing.monitoringEpochStart'))
+          .filter((s) => s !== null);
+
+        const waitingIndex = monitoringStates.indexOf('waitingForEpochStart');
+        const startedIndex = monitoringStates.indexOf('epochStarted');
+
+        expect(waitingIndex).toBeGreaterThanOrEqual(0);
+        expect(startedIndex).toBeGreaterThan(waitingIndex);
 
         actor.stop();
         subscription.unsubscribe();
@@ -321,30 +329,6 @@ describe('epochProcessorMachine', () => {
     });
 
     describe('committees', () => {
-      test('already fetched, should complete immediately', async () => {
-        vi.setSystemTime(new Date(EPOCH_101_START_TIME + 50));
-        (mockEpochController.fetchCommittees as any).mockResolvedValue({
-          success: true,
-          skipped: true,
-        });
-
-        const { actor, stateTransitions, subscription } = createAndStartActor(
-          createDefaultInput(100, {
-            epochDBSnapshot: { committeesFetched: true },
-          }),
-        );
-
-        // Run all pending promises and timers
-        await vi.runAllTimersAsync();
-
-        const lastState = getLastState(stateTransitions);
-        const committeesState = getNestedState(lastState, 'epochProcessing.fetching.committees');
-        expect(committeesState).toBe('complete');
-
-        actor.stop();
-        subscription.unsubscribe();
-      });
-
       test('not fetched, should process and complete', async () => {
         vi.setSystemTime(new Date(EPOCH_101_START_TIME + 50));
 
@@ -360,7 +344,7 @@ describe('epochProcessorMachine', () => {
         // Should be processing
         let lastState = getLastState(stateTransitions);
         let committeesState = getNestedState(lastState, 'epochProcessing.fetching.committees');
-        expect(committeesState).toBe('processing');
+        expect(committeesState).toBe('fetchingCommittees');
 
         // Complete the fetch
         fetchPromise.resolve({ success: true, skipped: false });
@@ -369,7 +353,7 @@ describe('epochProcessorMachine', () => {
         // Should be complete
         lastState = getLastState(stateTransitions);
         committeesState = getNestedState(lastState, 'epochProcessing.fetching.committees');
-        expect(committeesState).toBe('complete');
+        expect(committeesState).toBe('committeesFetched');
         expect(mockEpochController.fetchCommittees).toHaveBeenCalledWith(100);
 
         actor.stop();
@@ -383,8 +367,8 @@ describe('epochProcessorMachine', () => {
 
         await vi.runAllTimersAsync();
 
-        // Committees should be ready
-        expect(actor.getSnapshot().context.committeesReady).toBe(true);
+        // Committees should be marked as fetched in sync state
+        expect(actor.getSnapshot().context.sync.committeesFetched).toBe(true);
 
         actor.stop();
         subscription.unsubscribe();
@@ -392,29 +376,6 @@ describe('epochProcessorMachine', () => {
     });
 
     describe('syncingCommittees', () => {
-      test('already fetched, should complete immediately', async () => {
-        vi.setSystemTime(new Date(EPOCH_101_START_TIME + 50));
-        (mockEpochController.fetchSyncCommittees as any).mockResolvedValue({
-          success: true,
-          skipped: true,
-        });
-
-        const { actor, stateTransitions, subscription } = createAndStartActor(
-          createDefaultInput(100, {
-            epochDBSnapshot: { syncCommitteesFetched: true },
-          }),
-        );
-
-        await vi.runAllTimersAsync();
-
-        const lastState = getLastState(stateTransitions);
-        const syncState = getNestedState(lastState, 'epochProcessing.fetching.syncingCommittees');
-        expect(syncState).toBe('complete');
-
-        actor.stop();
-        subscription.unsubscribe();
-      });
-
       test('not fetched, should process and complete', async () => {
         vi.setSystemTime(new Date(EPOCH_101_START_TIME + 50));
 
@@ -430,7 +391,7 @@ describe('epochProcessorMachine', () => {
         // Should be processing
         let lastState = getLastState(stateTransitions);
         let syncState = getNestedState(lastState, 'epochProcessing.fetching.syncingCommittees');
-        expect(syncState).toBe('processing');
+        expect(syncState).toBe('fetchingSyncCommittees');
 
         // Complete the fetch
         fetchPromise.resolve({ success: true, skipped: false });
@@ -439,7 +400,7 @@ describe('epochProcessorMachine', () => {
         // Should be complete
         lastState = getLastState(stateTransitions);
         syncState = getNestedState(lastState, 'epochProcessing.fetching.syncingCommittees');
-        expect(syncState).toBe('complete');
+        expect(syncState).toBe('syncCommitteesFetched');
         expect(mockEpochController.fetchSyncCommittees).toHaveBeenCalledWith(100);
 
         actor.stop();
@@ -472,49 +433,17 @@ describe('epochProcessorMachine', () => {
         committeesPromise.resolve({ success: true, skipped: false });
         await vi.runAllTimersAsync();
 
-        // Should now be processing
+        // Should now be running the slots orchestrator
         lastState = getLastState(stateTransitions);
         slotsState = getNestedState(lastState, 'epochProcessing.fetching.slotsProcessing');
-        expect(slotsState).toBe('processing');
+        expect(slotsState).toBe('runningSlotsOrchestrator');
 
         actor.stop();
         subscription.unsubscribe();
       });
 
-      test('already processed, should skip to complete after committees ready', async () => {
-        vi.setSystemTime(new Date(EPOCH_101_START_TIME + 50));
-
-        const { actor, stateTransitions, subscription } = createAndStartActor(
-          createDefaultInput(100, {
-            epochDBSnapshot: { slotsFetched: true },
-          }),
-        );
-
-        vi.runOnlyPendingTimers();
-        await Promise.resolve();
-        vi.advanceTimersByTime(SLOT_DURATION);
-        await Promise.resolve();
-
-        // Wait for COMMITTEES_FETCHED event
-        vi.advanceTimersByTime(SLOT_DURATION);
-        await Promise.resolve();
-
-        const lastState = getLastState(stateTransitions);
-        const slotsState = getNestedState(lastState, 'epochProcessing.fetching.slotsProcessing');
-        // Should eventually reach processing or complete
-        expect([
-          'waitingForCommittees',
-          'processing',
-          'updatingSlotsFetched',
-          'complete',
-        ]).toContain(slotsState);
-
-        actor.stop();
-        subscription.unsubscribe();
-      });
-
-      test('should spawn slot orchestrator and wait for SLOTS_COMPLETED', async () => {
-        vi.setSystemTime(new Date(EPOCH_101_START_TIME + 50));
+      test('should spawn slot orchestrator and handle SLOTS_COMPLETED lifecycle', async () => {
+        vi.setSystemTime(new Date(EPOCH_100_START_TIME + 50));
 
         const { actor, stateTransitions, subscription } = createAndStartActor(
           createDefaultInput(100),
@@ -526,8 +455,8 @@ describe('epochProcessorMachine', () => {
         const lastState = getLastState(stateTransitions);
         const slotsState = getNestedState(lastState, 'epochProcessing.fetching.slotsProcessing');
 
-        // Should be processing now
-        expect(slotsState).toBe('processing');
+        // Should be running the orchestrator now
+        expect(slotsState).toBe('runningSlotsOrchestrator');
 
         // Get current snapshot to access slot orchestrator
         const currentSnapshot = actor.getSnapshot();
@@ -535,8 +464,34 @@ describe('epochProcessorMachine', () => {
         // Should have spawned the orchestrator
         expect(currentSnapshot.context.actors.slotOrchestratorActor).toBeTruthy();
 
-        // Verify it was invoked with correct input
+        // Verify committees were fetched for this epoch
         expect(mockEpochController.fetchCommittees).toHaveBeenCalledWith(100);
+
+        // Simulate SLOTS_COMPLETED from child
+        actor.send({ type: 'SLOTS_COMPLETED', epoch: 100 });
+        await vi.runAllTimersAsync();
+
+        // Verify lifecycle states in order
+        const slotsStates = stateTransitions
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .map((s: any) => getNestedState(s, 'epochProcessing.fetching.slotsProcessing'))
+          .filter((s) => s !== null);
+
+        const waitingIndex = slotsStates.indexOf('waitingForCommittees');
+        const runningIndex = slotsStates.indexOf('runningSlotsOrchestrator');
+        const updatingIndex = slotsStates.indexOf('updatingSlotsFetched');
+        const processedIndex = slotsStates.indexOf('slotsProcessed');
+
+        expect(waitingIndex).toBeGreaterThanOrEqual(0);
+        expect(runningIndex).toBeGreaterThan(waitingIndex);
+        expect(updatingIndex).toBeGreaterThan(runningIndex);
+        expect(processedIndex).toBeGreaterThan(updatingIndex);
+
+        // updateSlotsFetched should have been called
+        expect(mockEpochController.updateSlotsFetched).toHaveBeenCalledWith(100);
+
+        // Slot orchestrator actor should be cleared from context
+        expect(actor.getSnapshot().context.actors.slotOrchestratorActor).toBeNull();
 
         actor.stop();
         subscription.unsubscribe();
@@ -565,31 +520,7 @@ describe('epochProcessorMachine', () => {
         actor.stop();
         subscription.unsubscribe();
       });
-
-      test('epoch started, already processed, should complete', async () => {
-        vi.setSystemTime(new Date(EPOCH_101_START_TIME + 50));
-        (mockValidatorsController.trackTransitioningValidators as any).mockResolvedValue(undefined);
-
-        const { actor, stateTransitions, subscription } = createAndStartActor(
-          createDefaultInput(100, {
-            epochDBSnapshot: { validatorsActivationFetched: true },
-          }),
-        );
-
-        await vi.runAllTimersAsync();
-
-        const lastState = getLastState(stateTransitions);
-        const activationState = getNestedState(
-          lastState,
-          'epochProcessing.fetching.trackingValidatorsActivation',
-        );
-        expect(['processing', 'complete']).toContain(activationState);
-
-        actor.stop();
-        subscription.unsubscribe();
-      });
-
-      test('epoch started, not processed, should process and complete', async () => {
+      test('epoch started, should process and complete', async () => {
         vi.setSystemTime(new Date(EPOCH_101_START_TIME + 50));
 
         const trackingPromise = createControllablePromise<void>();
@@ -609,7 +540,7 @@ describe('epochProcessorMachine', () => {
           lastState,
           'epochProcessing.fetching.trackingValidatorsActivation',
         );
-        expect(activationState).toBe('processing');
+        expect(activationState).toBe('trackingActivation');
 
         // Complete tracking
         trackingPromise.resolve();
@@ -621,7 +552,7 @@ describe('epochProcessorMachine', () => {
           lastState,
           'epochProcessing.fetching.trackingValidatorsActivation',
         );
-        expect(activationState).toBe('complete');
+        expect(activationState).toBe('activationTracked');
         expect(mockValidatorsController.trackTransitioningValidators).toHaveBeenCalled();
 
         actor.stop();
@@ -652,29 +583,6 @@ describe('epochProcessorMachine', () => {
         subscription.unsubscribe();
       });
 
-      test('epoch started, already fetched, should complete', async () => {
-        vi.setSystemTime(new Date(EPOCH_101_START_TIME + 50));
-        (mockValidatorsController.fetchValidatorsBalances as any).mockResolvedValue(undefined);
-
-        const { actor, stateTransitions, subscription } = createAndStartActor(
-          createDefaultInput(100, {
-            epochDBSnapshot: { validatorsBalancesFetched: true },
-          }),
-        );
-
-        await vi.runAllTimersAsync();
-
-        const lastState = getLastState(stateTransitions);
-        const balancesState = getNestedState(
-          lastState,
-          'epochProcessing.fetching.validatorsBalances',
-        );
-        expect(['processing', 'complete']).toContain(balancesState);
-
-        actor.stop();
-        subscription.unsubscribe();
-      });
-
       test('epoch started, not fetched, should process and complete', async () => {
         vi.setSystemTime(new Date(EPOCH_101_START_TIME + 50));
 
@@ -695,7 +603,7 @@ describe('epochProcessorMachine', () => {
           lastState,
           'epochProcessing.fetching.validatorsBalances',
         );
-        expect(balancesState).toBe('processing');
+        expect(balancesState).toBe('fetchingValidatorsBalances');
 
         // Complete balances fetch
         balancesPromise.resolve();
@@ -704,7 +612,7 @@ describe('epochProcessorMachine', () => {
         // Should be complete
         lastState = getLastState(stateTransitions);
         balancesState = getNestedState(lastState, 'epochProcessing.fetching.validatorsBalances');
-        expect(balancesState).toBe('complete');
+        expect(balancesState).toBe('validatorsBalancesFetched');
         expect(mockValidatorsController.fetchValidatorsBalances).toHaveBeenCalled();
 
         actor.stop();
@@ -718,8 +626,8 @@ describe('epochProcessorMachine', () => {
 
         await vi.runAllTimersAsync();
 
-        // Balances should be ready
-        expect(actor.getSnapshot().context.balancesReady).toBe(true);
+        // Balances should be marked as fetched in sync state
+        expect(actor.getSnapshot().context.sync.validatorsBalancesFetched).toBe(true);
 
         actor.stop();
         subscription.unsubscribe();
@@ -750,36 +658,38 @@ describe('epochProcessorMachine', () => {
         subscription.unsubscribe();
       });
 
-      test('balances ready and epoch ended, should process rewards', async () => {
+      test('balances ready and epoch ended, should process rewards after prerequisites', async () => {
         // Set time after epoch has ended
-        const epochEndTime = EPOCH_101_START_TIME + 100;
+        const epochEndTime = EPOCH_101_START_TIME + SLOTS_PER_EPOCH * SLOT_DURATION + 100;
         vi.setSystemTime(new Date(epochEndTime));
 
-        const rewardsPromise = createControllablePromise<void>();
-        (mockEpochController.fetchRewards as any).mockReturnValue(rewardsPromise.promise);
+        (mockEpochController.fetchRewards as any).mockResolvedValue(undefined);
 
         const { actor, stateTransitions, subscription } = createAndStartActor(
-          createDefaultInput(100, {
-            epochDBSnapshot: { validatorsBalancesFetched: true },
-          }),
+          createDefaultInput(100),
+          {
+            areValidatorsBalancesFetched: () => true,
+          },
         );
 
         await vi.runAllTimersAsync();
 
-        // Should eventually be processing rewards
-        let lastState = getLastState(stateTransitions);
-        let rewardsState = getNestedState(lastState, 'epochProcessing.fetching.rewards');
-        expect(['waitingForBalances', 'processing', 'complete']).toContain(rewardsState);
+        // Collect rewards substates in order
+        const rewardsStates = stateTransitions
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .map((s: any) => getNestedState(s, 'epochProcessing.fetching.rewards'))
+          .filter((s) => s !== null);
 
-        // If still processing, complete the rewards fetch
-        if (rewardsState === 'processing') {
-          rewardsPromise.resolve();
-          await vi.runAllTimersAsync();
+        const fetchingRewardsIndex = rewardsStates.indexOf('fetchingRewards');
+        const rewardsFetchedIndex = rewardsStates.indexOf('rewardsFetched');
 
-          lastState = getLastState(stateTransitions);
-          rewardsState = getNestedState(lastState, 'epochProcessing.fetching.rewards');
-          expect(rewardsState).toBe('complete');
-        }
+        // Depending on timing and guards, we may not observe waitingForEpochEnd
+        // as a stable snapshot. We only require that rewards are fetched in order.
+        expect(fetchingRewardsIndex).toBeGreaterThanOrEqual(0);
+        expect(rewardsFetchedIndex).toBeGreaterThan(fetchingRewardsIndex);
+
+        // Controller should have been called once prerequisites were met
+        expect(mockEpochController.fetchRewards).toHaveBeenCalledWith(100);
 
         actor.stop();
         subscription.unsubscribe();
@@ -787,34 +697,8 @@ describe('epochProcessorMachine', () => {
     });
   });
 
-  describe('complete', () => {
-    test('should process epoch with all flags already set', async () => {
-      vi.setSystemTime(new Date(EPOCH_101_START_TIME + SLOTS_PER_EPOCH * SLOT_DURATION + 100));
-
-      const { actor, subscription } = createAndStartActor(
-        createDefaultInput(100, {
-          epochDBSnapshot: {
-            committeesFetched: true,
-            syncCommitteesFetched: true,
-            validatorsBalancesFetched: true,
-            validatorsActivationFetched: true,
-            slotsFetched: false, // Set to false so it doesn't try to spawn orchestrator
-            rewardsFetched: true,
-          },
-        }),
-      );
-
-      await vi.runAllTimersAsync();
-
-      // Verify that all the controller methods were called
-      expect(mockEpochController.fetchCommittees).toHaveBeenCalled();
-      expect(mockEpochController.fetchSyncCommittees).toHaveBeenCalled();
-      expect(mockValidatorsController.fetchValidatorsBalances).toHaveBeenCalled();
-      expect(mockEpochController.fetchRewards).toHaveBeenCalled();
-      expect(mockValidatorsController.trackTransitioningValidators).toHaveBeenCalled();
-
-      actor.stop();
-      subscription.unsubscribe();
-    });
-  });
+  // Note: finalization (markingEpochProcessed/epochCompleted) and parent signaling
+  // via sendParent are integration concerns when this machine is spawned by a parent.
+  // They are covered indirectly by verifying that all child regions and controllers
+  // behave correctly; direct parent signaling is tested at the orchestrator level.
 });

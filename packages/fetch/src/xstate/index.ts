@@ -2,7 +2,7 @@ import { getCreateEpochActor, getEpochOrchestratorActor } from './epoch/index.js
 
 import { EpochController } from '@/src/services/consensus/controllers/epoch.js';
 import { SlotController } from '@/src/services/consensus/controllers/slot.js';
-import { BeaconTime } from '@/src/services/consensus/utils/time.js';
+import { BeaconTime } from '@/src/services/consensus/utils/beaconTime.js';
 
 export default function initXstateMachines(
   epochController: EpochController,

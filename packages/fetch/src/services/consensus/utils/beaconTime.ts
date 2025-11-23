@@ -8,6 +8,7 @@ export class BeaconTime {
   private readonly slotsPerEpoch: number;
   private readonly epochsPerSyncCommitteePeriod: number;
   private readonly lookbackSlot: number;
+  private readonly delaySlotsToHead: number;
 
   constructor(config: {
     genesisTimestamp: number;
@@ -15,12 +16,14 @@ export class BeaconTime {
     slotsPerEpoch: number;
     epochsPerSyncCommitteePeriod: number;
     lookbackSlot: number;
+    delaySlotsToHead?: number;
   }) {
     this.genesisTimestamp = config.genesisTimestamp;
     this.slotDurationMs = config.slotDurationMs;
     this.slotsPerEpoch = config.slotsPerEpoch;
     this.epochsPerSyncCommitteePeriod = config.epochsPerSyncCommitteePeriod;
     this.lookbackSlot = config.lookbackSlot;
+    this.delaySlotsToHead = config.delaySlotsToHead ?? 0;
   }
 
   /**
@@ -108,5 +111,42 @@ export class BeaconTime {
    */
   getLookbackSlot(): number {
     return this.lookbackSlot;
+  }
+
+  /**
+   * Check if a given slot is considered started for querying, including delaySlotsToHead.
+   * A slot S is "started" when currentSlot >= S + delaySlotsToHead.
+   * @param slotNumber Slot to check
+   */
+  hasSlotStarted(slotNumber: number): boolean {
+    const effectiveStartSlot = slotNumber + this.delaySlotsToHead;
+    const slotStartTimestamp = this.getTimestampFromSlotNumber(effectiveStartSlot);
+    return Date.now() >= slotStartTimestamp;
+  }
+
+  /**
+   * Check if a given epoch has ended, meaning the last slot of the epoch has passed
+   * (including delaySlotsToHead).
+   * @param epochNumber Epoch to check
+   */
+  hasEpochEnded(epochNumber: number): boolean {
+    const { endSlot } = this.getEpochSlots(epochNumber);
+    // The epoch has ended when the slot after the last slot has started
+    return this.hasSlotStarted(endSlot + 1);
+  }
+
+  /**
+   * Resolve once the provided slot is considered started for querying, including delaySlotsToHead.
+   * If the slot already started, resolves immediately.
+   * @param slotNumber Slot to wait for the start
+   */
+  async waitUntilSlotStart(slotNumber: number): Promise<void> {
+    const effectiveStartSlot = slotNumber + this.delaySlotsToHead;
+    const slotStartTimestamp = this.getTimestampFromSlotNumber(effectiveStartSlot);
+    const delayMs = Math.max(0, slotStartTimestamp - Date.now());
+    if (delayMs === 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 }

@@ -7,7 +7,7 @@ import type { CustomLogger } from '@/src/lib/pino.js';
 import { EpochController } from '@/src/services/consensus/controllers/epoch.js';
 import { SlotController } from '@/src/services/consensus/controllers/slot.js';
 import { ValidatorsController } from '@/src/services/consensus/controllers/validators.js';
-import { BeaconTime } from '@/src/services/consensus/utils/time.js';
+import { BeaconTime } from '@/src/services/consensus/utils/beaconTime.js';
 import { logActor } from '@/src/xstate/multiMachineLogger.js';
 import { pinoLog } from '@/src/xstate/pinoLog.js';
 
@@ -130,14 +130,6 @@ export const epochOrchestratorMachine = setup({
               id: epochId,
               input: {
                 epoch,
-                epochDBSnapshot: {
-                  validatorsBalancesFetched: context.epochData.validatorsBalancesFetched,
-                  rewardsFetched: context.epochData.rewardsFetched,
-                  committeesFetched: context.epochData.committeesFetched,
-                  slotsFetched: context.epochData.allSlotsProcessed,
-                  syncCommitteesFetched: context.epochData.syncCommitteesFetched,
-                  validatorsActivationFetched: context.epochData.validatorsActivationFetched,
-                },
                 config: {
                   slotDuration: context.slotDuration,
                   lookbackSlot: context.lookbackSlot,

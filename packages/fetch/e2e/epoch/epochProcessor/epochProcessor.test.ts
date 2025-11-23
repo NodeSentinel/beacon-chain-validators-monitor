@@ -17,7 +17,7 @@ import { ValidatorControllerHelpers } from '@/src/services/consensus/controllers
 import { EpochStorage } from '@/src/services/consensus/storage/epoch.js';
 import { ValidatorsStorage } from '@/src/services/consensus/storage/validators.js';
 import { GetCommittees } from '@/src/services/consensus/types.js';
-import { BeaconTime } from '@/src/services/consensus/utils/time.js';
+import { BeaconTime } from '@/src/services/consensus/utils/beaconTime.js';
 
 /**
  * Note: Mocked data from this tests was taken from Gnosis chain.

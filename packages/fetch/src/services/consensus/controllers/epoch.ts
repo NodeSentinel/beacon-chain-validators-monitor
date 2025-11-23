@@ -5,7 +5,7 @@ import { EpochControllerHelpers } from './helpers/epochControllerHelpers.js';
 import { BeaconClient } from '@/src/services/consensus/beacon.js';
 import { EpochStorage } from '@/src/services/consensus/storage/epoch.js';
 import { ValidatorsStorage } from '@/src/services/consensus/storage/validators.js';
-import { BeaconTime } from '@/src/services/consensus/utils/time.js';
+import { BeaconTime } from '@/src/services/consensus/utils/beaconTime.js';
 import { getUTCDatetimeRoundedToHour } from '@/src/utils/date/index.js';
 
 export class EpochController extends EpochControllerHelpers {

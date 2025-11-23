@@ -10,7 +10,7 @@ import { ValidatorsController } from '@/src/services/consensus/controllers/valid
 import { EpochStorage } from '@/src/services/consensus/storage/epoch.js';
 import { SlotStorage } from '@/src/services/consensus/storage/slot.js';
 import { ValidatorsStorage } from '@/src/services/consensus/storage/validators.js';
-import { BeaconTime } from '@/src/services/consensus/utils/time.js';
+import { BeaconTime } from '@/src/services/consensus/utils/beaconTime.js';
 import initXstateMachines from '@/src/xstate/index.js';
 import { getMultiMachineLogger } from '@/src/xstate/multiMachineLogger.js';
 
@@ -41,6 +41,7 @@ async function main() {
     slotsPerEpoch: chainConfig.beacon.slotsPerEpoch,
     epochsPerSyncCommitteePeriod: chainConfig.beacon.epochsPerSyncCommitteePeriod,
     lookbackSlot: env.CONSENSUS_LOOKBACK_SLOT,
+    delaySlotsToHead: chainConfig.beacon.delaySlotsToHead,
   });
 
   const validatorsStorage = new ValidatorsStorage(prisma);
