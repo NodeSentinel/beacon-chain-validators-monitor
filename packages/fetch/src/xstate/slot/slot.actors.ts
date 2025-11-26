@@ -118,6 +118,7 @@ export const getSlot = fromPromise(async ({ input }: { input: CheckSlotProcessed
 /**
  * Actor to check if a slot is ready to be processed
  * based on CONSENSUS_DELAY_SLOTS_TO_HEAD
+ * TODO: delaySlotsToHead has to be handled on beaconTime class
  */
 export const checkSlotReady = fromPromise(async ({ input }: { input: CheckSlotReadyInput }) => {
   const currentSlot = getSlotNumberFromTimestamp(Date.now());

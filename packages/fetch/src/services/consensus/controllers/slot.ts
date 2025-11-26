@@ -68,6 +68,7 @@ export class SlotController extends SlotControllerHelpers {
 
   /**
    * Check if a slot is ready to be processed based on CONSENSUS_DELAY_SLOTS_TO_HEAD
+   * TODO: delaySlotsToHead has to be handled on beaconTime class
    */
   async canSlotBeProcessed(slot: number, delaySlotsToHead: number) {
     const currentSlot = this.beaconTime.getSlotNumberFromTimestamp(Date.now());

@@ -87,11 +87,6 @@ export const epochProcessorMachine = setup({
         await input.validatorsController.fetchValidatorsBalances(input.startSlot, input.epoch);
       },
     ),
-    fetchAttestationsRewards: fromPromise(
-      async ({ input }: { input: { epochController: EpochController; epoch: number } }) => {
-        await input.epochController.fetchRewards(input.epoch);
-      },
-    ),
     trackingTransitioningValidators: fromPromise(
       async ({
         input,
@@ -127,28 +122,26 @@ export const epochProcessorMachine = setup({
         await input.beaconTime.waitUntilSlotStart(input.startSlot);
       },
     ),
-    // Wait for epoch end and balances, then fetch rewards
-    fetchRewardsAfterPrerequisites: fromPromise(
-      async ({
-        input,
-      }: {
-        input: {
-          epochController: EpochController;
-          beaconTime: BeaconTime;
-          epoch: number;
-          endSlot: number;
-        };
-      }) => {
-        // Wait for epoch end
-        const endTimestamp = input.beaconTime.getTimestampFromSlotNumber(input.endSlot + 1);
-        const now = Date.now();
-        const delay = Math.max(0, endTimestamp - now);
-
-        if (delay > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-
-        // Fetch rewards
+    // Wait until we can process an epoch (we can process epoch N when current epoch >= N-1)
+    waitToProcessEpoch: fromPromise(
+      async ({ input }: { input: { beaconTime: BeaconTime; epoch: number } }) => {
+        // We can process epoch X when epoch X-1 has started
+        // So we wait until epoch X-1 starts
+        const prevEpoch = input.epoch - 1;
+        const { startSlot } = input.beaconTime.getEpochSlots(prevEpoch);
+        await input.beaconTime.waitUntilSlotStart(startSlot);
+      },
+    ),
+    // Wait for epoch end
+    waitForEpochEnd: fromPromise(
+      async ({ input }: { input: { beaconTime: BeaconTime; endSlot: number } }) => {
+        // Wait until the slot after the last slot of the epoch has started
+        await input.beaconTime.waitUntilSlotStart(input.endSlot + 1);
+      },
+    ),
+    // Fetch rewards after epoch has ended
+    fetchAttestationsRewards: fromPromise(
+      async ({ input }: { input: { epochController: EpochController; epoch: number } }) => {
         await input.epochController.fetchRewards(input.epoch);
       },
     ),
@@ -241,23 +234,30 @@ export const epochProcessorMachine = setup({
             target: 'epochProcessing',
           },
           {
-            target: 'waitingForEpochStart',
+            target: 'waitingToProcessEpoch',
           },
         ],
       },
     },
-    waitingForEpochStart: {
+    waitingToProcessEpoch: {
       entry: pinoLog(
-        ({ context }) => `Waiting for epoch ${context.epoch} to start`,
+        ({ context }) => `Waiting to be able to process epoch ${context.epoch}`,
         'EpochProcessor',
       ),
-      after: {
-        slotDurationHalf: 'checkingCanProcess',
+      invoke: {
+        src: 'waitToProcessEpoch',
+        input: ({ context }) => ({
+          beaconTime: context.services.beaconTime,
+          epoch: context.epoch,
+        }),
+        onDone: {
+          target: 'checkingCanProcess',
+        },
       },
     },
     epochProcessing: {
       description:
-        'processing beacon epoch data. Note that data can be processed at different times, some 1 epoch ahead and some after the epoch start.',
+        'processing beacon epoch data. Note that data can be processed at different times, some 1 epoch ahead and some after the epoch started.',
       entry: pinoLog(
         ({ context }) => `Starting epoch processing for epoch ${context.epoch}`,
         'EpochProcessor',
@@ -606,15 +606,14 @@ export const epochProcessorMachine = setup({
                       `Waiting for epoch ${context.epoch} to end before fetching rewards`,
                     'EpochProcessor:rewards',
                   ),
-                  after: {
-                    0: {
-                      guard: 'hasEpochEnded',
+                  invoke: {
+                    src: 'waitForEpochEnd',
+                    input: ({ context }) => ({
+                      beaconTime: context.services.beaconTime,
+                      endSlot: context.endSlot,
+                    }),
+                    onDone: {
                       target: 'fetchingRewards',
-                    },
-                    slotDurationHalf: {
-                      guard: 'hasEpochEnded',
-                      target: 'fetchingRewards',
-                      reenter: true,
                     },
                   },
                 },
@@ -624,12 +623,10 @@ export const epochProcessorMachine = setup({
                     'EpochProcessor:rewards',
                   ),
                   invoke: {
-                    src: 'fetchRewardsAfterPrerequisites',
+                    src: 'fetchAttestationsRewards',
                     input: ({ context }) => ({
                       epochController: context.services.epochController,
-                      beaconTime: context.services.beaconTime,
                       epoch: context.epoch,
-                      endSlot: context.endSlot,
                     }),
                     onDone: {
                       target: 'rewardsFetched',

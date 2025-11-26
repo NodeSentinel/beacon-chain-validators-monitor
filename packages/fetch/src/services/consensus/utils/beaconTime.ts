@@ -113,6 +113,9 @@ export class BeaconTime {
     return this.lookbackSlot;
   }
 
+  // TODO: add delaySlotsToHead only when slotNumber is >=  currentSlot - delaySlotsToHead
+  // I think is already done, but check anyway
+
   /**
    * Check if a given slot is considered started for querying, including delaySlotsToHead.
    * A slot S is "started" when currentSlot >= S + delaySlotsToHead.
