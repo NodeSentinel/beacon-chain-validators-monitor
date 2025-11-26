@@ -11,7 +11,7 @@ import { shouldMockTelegram, setupTelegramMock } from '@/lib/mockTelegramEnv';
 /**
  * Inner component that handles post-SDK initialization
  */
-function TelegramAppInitializer({ children }: PropsWithChildren<Record<string, never>>) {
+function TelegramAppInitializer({ children }: PropsWithChildren) {
   const lp = useLaunchParams();
 
   useEffect(() => {
@@ -42,7 +42,7 @@ function TelegramAppInitializer({ children }: PropsWithChildren<Record<string, n
  * - Mocks environment in development (if NEXT_PUBLIC_TG_MOCK=true)
  * - Provides launch params access
  */
-export function TelegramProvider({ children }: PropsWithChildren<Record<string, never>>) {
+export function TelegramProvider({ children }: PropsWithChildren) {
   const [isMounted, setIsMounted] = useState(false);
   const [isSdkReady, setIsSdkReady] = useState(false);
 
