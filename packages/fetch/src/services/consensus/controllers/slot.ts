@@ -108,6 +108,18 @@ export class SlotController extends SlotControllerHelpers {
   }
 
   /**
+   * Get the slot processing status for an epoch.
+   * Returns semantic information about whether there's a slot to process
+   * and whether all slots in the epoch are fully processed.
+   *
+   * This method is robust against the case where slots haven't been created yet,
+   * distinguishing between "no slots exist" and "all slots are processed".
+   */
+  async getEpochSlotsStatus(startSlot: number, endSlot: number) {
+    return this.slotStorage.getEpochSlotsStatus(startSlot, endSlot);
+  }
+
+  /**
    * Fetch and process execution layer rewards
    * TODO: Implement using fetch/src/services/execution/endpoints.ts
    * And move to block controller in service/execution

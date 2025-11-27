@@ -1,20 +1,34 @@
-import { setup, assign, stopChild, sendParent, ActorRefFrom } from 'xstate';
+/**
+ * @fileoverview The slot orchestrator is a state machine that is responsible for orchestrating the processing of slots within an epoch.
+ *
+ * It is responsible for:
+ * - Finding the next unprocessed slot via SlotController
+ * - Spawning slot processor machines sequentially
+ * - Monitoring slot completion
+ * - Moving to the next slot until all slots are processed
+ * - Safely handling the case where slots haven't been created yet
+ *
+ * This machine processes slots one at a time within an epoch.
+ */
+
+import { setup, assign, stopChild, sendParent, ActorRefFrom, fromPromise } from 'xstate';
 
 import { SlotController } from '@/src/services/consensus/controllers/slot.js';
 import { getEpochSlots } from '@/src/services/consensus/utils/misc.js';
 import { logActor, logRemoveMachine } from '@/src/xstate/multiMachineLogger.js';
 import { pinoLog } from '@/src/xstate/pinoLog.js';
-import { findMinUnprocessedSlotInEpoch } from '@/src/xstate/slot/slot.actors.js';
 import { slotProcessorMachine } from '@/src/xstate/slot/slotProcessor.machine.js';
 
 export interface SlotOrchestratorContext {
   epoch: number;
   startSlot: number;
   endSlot: number;
-  currentSlot: number;
-  slotActor: ActorRefFrom<typeof slotProcessorMachine> | null;
+  currentSlot: number | null;
   lookbackSlot: number;
   slotDuration: number;
+
+  slotActor: ActorRefFrom<typeof slotProcessorMachine> | null;
+
   slotController: SlotController;
 }
 
@@ -28,23 +42,7 @@ export interface SlotOrchestratorInput {
 // Extract the SLOTS_COMPLETED event type for reuse in other machines
 export type SlotsCompletedEvent = { type: 'SLOTS_COMPLETED'; epoch: number };
 
-export type SlotOrchestratorEvents =
-  | SlotsCompletedEvent
-  | { type: 'SLOT_COMPLETED' }
-  | { type: 'NEXT_SLOT_FOUND'; nextSlot: number };
-
-/**
- * @fileoverview The slot orchestrator is a state machine that is responsible for orchestrating the processing of slots within an epoch.
- *
- * It is responsible for:
- * - Getting all slots for the epoch
- * - Finding the next unprocessed slot
- * - Spawning slot processor machines sequentially
- * - Monitoring slot completion
- * - Moving to the next slot until all slots are processed
- *
- * This machine processes slots one at a time within an epoch.
- */
+export type SlotOrchestratorEvents = SlotsCompletedEvent | { type: 'SLOT_COMPLETED' };
 
 export const slotOrchestratorMachine = setup({
   types: {} as {
@@ -54,49 +52,30 @@ export const slotOrchestratorMachine = setup({
   },
   actors: {
     slotProcessor: slotProcessorMachine,
-    findMinUnprocessedSlotInEpoch,
+    findNextSlotStatus: fromPromise(
+      async ({
+        input,
+      }: {
+        input: { slotController: SlotController; startSlot: number; endSlot: number };
+      }) => {
+        return input.slotController.getEpochSlotsStatus(input.startSlot, input.endSlot);
+      },
+    ),
   },
   guards: {
-    hasSlotToProcess: ({ context }) => context.currentSlot <= context.endSlot,
-  },
-  actions: {
-    sendEvent_slotsCompleted: sendParent(({ context }) => ({
-      type: 'SLOTS_COMPLETED',
-      epoch: context.epoch,
-    })),
-    spawn_slotProcessor: assign({
-      slotActor: ({ context, spawn }) => {
-        const slotId = `slotProcessor:${context.epoch}:${context.currentSlot}`;
-
-        const actor = spawn('slotProcessor', {
-          id: slotId,
-          input: {
-            epoch: context.epoch,
-            slot: context.currentSlot,
-            slotDuration: context.slotDuration,
-            lookbackSlot: context.lookbackSlot,
-            slotController: context.slotController,
-          },
-        });
-
-        // Automatically log the actor's state and context
-        logActor(actor, slotId);
-
-        return actor;
-      },
-    }),
-    stopSlotProcessor: stopChild(({ context }) => context.slotActor?.id || ''),
-    assign_resetActorAndIncrementSlot: assign({
-      slotActor: null,
-      currentSlot: ({ context }) => context.currentSlot! + 1,
-    }),
-    removeMachineLog: ({ context }) => {
-      logRemoveMachine(context.slotActor?.id || '', 'SLOT_COMPLETED');
+    hasNextSlotToProcess: (_, params: { nextSlotToProcess: number | null }) => {
+      return params.nextSlotToProcess !== null;
     },
+    allSlotsProcessed: (_, params: { allSlotsProcessed: boolean }) => {
+      return params.allSlotsProcessed === true;
+    },
+  },
+  delays: {
+    slotDurationThird: ({ context }) => context.slotDuration / 3,
   },
 }).createMachine({
   id: 'SlotOrchestrator',
-  initial: 'spawningSlotProcessor',
+  initial: 'findingNextSlot',
   context: ({ input }) => {
     const { startSlot: _startSlot, endSlot } = getEpochSlots(input.epoch);
     const startSlot = Math.max(_startSlot, input.lookbackSlot);
@@ -105,7 +84,7 @@ export const slotOrchestratorMachine = setup({
       epoch: input.epoch,
       startSlot,
       endSlot,
-      currentSlot: startSlot,
+      currentSlot: null,
       slotActor: null,
       lookbackSlot: input.lookbackSlot,
       slotDuration: input.slotDuration,
@@ -113,11 +92,94 @@ export const slotOrchestratorMachine = setup({
     };
   },
   states: {
+    findingNextSlot: {
+      entry: pinoLog(
+        ({ context }) => `Finding next slot to process for epoch ${context.epoch}`,
+        'SlotOrchestrator',
+      ),
+      invoke: {
+        src: 'findNextSlotStatus',
+        input: ({ context }) => ({
+          slotController: context.slotController,
+          startSlot: context.startSlot,
+          endSlot: context.endSlot,
+        }),
+        onDone: [
+          {
+            // Case 1: There's a slot to process
+            guard: {
+              type: 'hasNextSlotToProcess',
+              params: ({ event }) => ({
+                nextSlotToProcess: event.output.nextSlotToProcess,
+              }),
+            },
+            target: 'spawningSlotProcessor',
+            actions: assign({
+              currentSlot: ({ event }) => event.output.nextSlotToProcess,
+            }),
+          },
+          {
+            // Case 2: No slot to process and all slots are processed
+            guard: {
+              type: 'allSlotsProcessed',
+              params: ({ event }) => ({
+                allSlotsProcessed: event.output.allSlotsProcessed,
+              }),
+            },
+            target: 'allSlotsComplete',
+            actions: pinoLog(
+              ({ context }) => `All slots processed for epoch ${context.epoch}`,
+              'SlotOrchestrator',
+            ),
+          },
+          {
+            // Case 3: No slot to process but not all slots are processed (slots not created yet)
+            target: 'errorSlotsNotCreated',
+            actions: pinoLog(
+              ({ context }) =>
+                `No slots available yet for epoch ${context.epoch}, waiting for slots to be created`,
+              'SlotOrchestrator',
+              'warn',
+            ),
+          },
+        ],
+      },
+    },
+
+    errorSlotsNotCreated: {
+      entry: pinoLog(
+        ({ context }) => `No slots found for epoch ${context.epoch}`,
+        'SlotOrchestrator',
+        'error',
+      ),
+    },
+
     spawningSlotProcessor: {
       entry: [
-        'spawn_slotProcessor',
+        assign({
+          slotActor: ({ context, spawn }) => {
+            const slotId = `slotProcessor:${context.epoch}:${context.currentSlot}`;
+
+            const actor = spawn('slotProcessor', {
+              id: slotId,
+              input: {
+                epoch: context.epoch,
+                slot: context.currentSlot!,
+                slotDuration: context.slotDuration,
+                lookbackSlot: context.lookbackSlot,
+                slotController: context.slotController,
+              },
+            });
+
+            // Automatically log the actor's state and context
+            logActor(actor, slotId);
+
+            return actor;
+          },
+        }),
         pinoLog(
-          ({ context }) => `Spawning slot processor for epoch ${context.epoch}`,
+          ({ context }) =>
+            `Spawning slot processor for slot ${context.currentSlot} in epoch ${context.epoch}`,
           'SlotOrchestrator',
         ),
       ],
@@ -126,36 +188,40 @@ export const slotOrchestratorMachine = setup({
           target: 'slotComplete',
           actions: [
             pinoLog(
-              ({ context }) => `Slot completed for epoch ${context.epoch}`,
+              ({ context }) => `Slot ${context.currentSlot} completed for epoch ${context.epoch}`,
               'SlotOrchestrator',
             ),
-            'removeMachineLog',
-            'stopSlotProcessor',
-            'assign_resetActorAndIncrementSlot',
+            ({ context }) => {
+              logRemoveMachine(context.slotActor?.id || '', 'SLOT_COMPLETED');
+            },
+            stopChild(({ context }) => context.slotActor?.id || ''),
+            assign({
+              slotActor: null,
+              currentSlot: null,
+            }),
           ],
         },
       },
     },
 
     slotComplete: {
-      entry: pinoLog(
-        ({ context }) => `Slot complete for epoch ${context.epoch}`,
-        'SlotOrchestrator',
-      ),
-
-      always: [
-        {
-          guard: 'hasSlotToProcess',
-          target: 'spawningSlotProcessor',
-        },
-        {
-          target: 'allSlotsComplete',
-        },
-      ],
+      // Immediately go back to finding the next slot
+      always: {
+        target: 'findingNextSlot',
+      },
     },
 
     allSlotsComplete: {
-      entry: ['sendEvent_slotsCompleted'],
+      entry: [
+        pinoLog(
+          ({ context }) => `All slots complete for epoch ${context.epoch}`,
+          'SlotOrchestrator',
+        ),
+        sendParent(({ context }) => ({
+          type: 'SLOTS_COMPLETED',
+          epoch: context.epoch,
+        })),
+      ],
       type: 'final',
     },
   },

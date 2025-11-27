@@ -149,6 +149,44 @@ export class SlotStorage {
   }
 
   /**
+   * Get the slot processing status for an epoch range.
+   * Returns the next unprocessed slot (if any) and whether all slots are processed.
+   */
+  async getEpochSlotsStatus(startSlot: number, endSlot: number) {
+    // Single query to get all slots in the range
+    const slots = await this.prisma.slot.findMany({
+      where: {
+        slot: {
+          gte: startSlot,
+          lte: endSlot,
+        },
+      },
+      select: {
+        slot: true,
+        processed: true,
+      },
+      orderBy: {
+        slot: 'asc',
+      },
+    });
+
+    const expectedSlotCount = endSlot - startSlot + 1;
+    const totalSlots = slots.length;
+    const processedSlots = slots.filter((s) => s.processed).length;
+
+    // Find first unprocessed slot
+    const firstUnprocessed = slots.find((s) => !s.processed);
+
+    return {
+      nextSlotToProcess: firstUnprocessed?.slot ?? null,
+      // All slots are processed only if:
+      // 1. We have all the expected slots in the DB
+      // 2. All of them are marked as processed
+      allSlotsProcessed: totalSlots === expectedSlotCount && processedSlots === expectedSlotCount,
+    };
+  }
+
+  /**
    * Check if slot has all required processing completed
    */
   async isSlotFullyProcessed(slot: number) {
