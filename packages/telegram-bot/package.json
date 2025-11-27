@@ -1,5 +1,5 @@
 {
-  "name": "telegram-bot-template",
+  "name": "telegram-bot",
   "type": "module",
   "version": "0.1.0",
   "private": true,
@@ -7,20 +7,21 @@
   "imports": {
     "@/*": "./build/*"
   },
-  "author": "deptyped <deptyped@gmail.com>",
+  "author": "Nicolás Domínguez <nf.dominguez.87@gmail.com>",
   "license": "SEE LICENSE IN LICENSE",
   "engines": {
     "node": ">=22.0.0"
   },
   "scripts": {
     "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "format": "eslint . --fix",
     "type-check": "tsc --noEmit",
     "build": "tsc",
     "dev": "tsc-watch --onSuccess \"tsx ./src/main.ts\"",
     "start": "tsc && tsx ./src/main.ts",
     "start:force": "tsx ./src/main.ts",
-    "prepare": "husky || true"
+    "test": "echo \"No tests for telegram-bot\""
   },
   "dependencies": {
     "@grammyjs/auto-chat-action": "0.1.1",
@@ -44,15 +45,11 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "4.12.0",
-    "@types/node": "^22.15.21",
-    "eslint": "^9.27.0",
+    "@types/node": "^22.17.2",
+    "eslint": "^8.57.1",
     "husky": "^9.1.7",
     "lint-staged": "^15.5.1",
     "tsc-watch": "^6.3.1",
     "typescript": "^5.9.2"
-  },
-  "lint-staged": {
-    "*.ts": "eslint"
   }
 }

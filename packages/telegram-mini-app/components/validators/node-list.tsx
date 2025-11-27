@@ -29,7 +29,6 @@ function getAggregatedNode(nodes: Node[]): Node {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _totalValidators = nodes.reduce((sum, node) => sum + node.validators.length, 0);
   const allValidators = nodes.flatMap((node) => node.validators);
   const totalBalance = nodes.reduce((sum, node) => sum + node.totalBalance, 0);

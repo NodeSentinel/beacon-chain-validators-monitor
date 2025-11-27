@@ -20,7 +20,7 @@ import { EpochStorage } from '@/src/services/consensus/storage/epoch.js';
 import { SlotStorage } from '@/src/services/consensus/storage/slot.js';
 import { ValidatorsStorage } from '@/src/services/consensus/storage/validators.js';
 import { GetCommittees, Block } from '@/src/services/consensus/types.js';
-import { BeaconTime } from '@/src/services/consensus/utils/time.js';
+import { BeaconTime } from '@/src/services/consensus/utils/beaconTime.js';
 import { getUTCDatetimeRoundedToHour } from '@/src/utils/date/index.js';
 
 /**

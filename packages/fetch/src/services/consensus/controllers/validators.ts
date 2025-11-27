@@ -20,9 +20,10 @@ export class ValidatorsController {
     const batchSize = 1_000_000;
     let allValidatorsData: Awaited<ReturnType<typeof this.beaconClient.getValidators>> = [];
     let currentValidatorId = 0;
+    let hasMore = true;
 
     // Keep fetching validators in batches until we get fewer results than batchSize
-    while (true) {
+    while (hasMore) {
       // Generate batch of validator IDs starting from currentValidatorId
       const batchIds = Array.from({ length: batchSize }, (_, i) => String(currentValidatorId + i));
 
@@ -30,13 +31,13 @@ export class ValidatorsController {
 
       allValidatorsData = [...allValidatorsData, ...batchResult];
 
-      // If we get fewer results than batchSize, we've reached the end
-      if (batchResult.length < batchSize) {
-        break;
-      }
+      // If we get fewer results than batchSize, we have reached the end
+      hasMore = batchResult.length === batchSize;
 
-      // Move to next batch
-      currentValidatorId += batchSize;
+      // Move to next batch only when there are more validators to fetch
+      if (hasMore) {
+        currentValidatorId += batchSize;
+      }
     }
 
     await this.validatorsStorage.saveValidators(

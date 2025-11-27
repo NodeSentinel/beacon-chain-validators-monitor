@@ -124,7 +124,16 @@ export class MultiMachineLogger {
   private updateDisplay() {
     const statusData = {
       timestamp: new Date().toISOString(),
-      machines: {} as Record<string, any>,
+      machines: {} as Record<
+        string,
+        {
+          status: 'final' | 'active' | 'waiting';
+          lastUpdate: string | null;
+          state: unknown;
+          context: Record<string, unknown> | null;
+          isFinal?: boolean;
+        }
+      >,
     };
 
     // Add machine data
@@ -177,7 +186,29 @@ export class MultiMachineLogger {
     }
 
     // Write final status with machines state
-    const finalStatus = {
+    const finalStatus: {
+      timestamp: string;
+      summary: {
+        totalMachines: number;
+        activeMachines: number;
+        lastUpdate: string;
+        status: 'stopped';
+        message: string;
+      };
+      machines: Record<
+        string,
+        {
+          status: 'stopped';
+          lastUpdate: string | null;
+          state: {
+            current?: unknown;
+            previous?: unknown;
+            type?: string;
+          } | null;
+          context: Record<string, unknown> | null;
+        }
+      >;
+    } = {
       timestamp: new Date().toISOString(),
       summary: {
         totalMachines: this.machines.size,
@@ -186,7 +217,7 @@ export class MultiMachineLogger {
         status: 'stopped',
         message: 'Multi-machine logger stopped',
       },
-      machines: {} as Record<string, any>,
+      machines: {},
     };
 
     // Add final machine states
@@ -195,8 +226,12 @@ export class MultiMachineLogger {
         finalStatus.machines[machineId] = {
           status: 'stopped',
           lastUpdate: machine.currentLog.timestamp,
-          state: this.parseState(machine.currentLog.state),
-          context: machine.currentLog.context || null,
+          state: this.parseState(machine.currentLog.state) as {
+            current?: unknown;
+            previous?: unknown;
+            type?: string;
+          },
+          context: machine.currentLog.context ?? null,
         };
       } else {
         finalStatus.machines[machineId] = {
@@ -226,14 +261,14 @@ export class MultiMachineLogger {
   /**
    * Parse and clean state data - handles JSON parsing and removes prefixes
    */
-  private parseState(state: string): any {
+  private parseState(state: string): unknown {
     // Remove "State: " prefix if present
     const cleanState = state.replace(/^State:\s*/, '');
 
+    // If JSON.parse fails, return the cleaned string value
     try {
-      return JSON.parse(cleanState);
-    } catch (e) {
-      // If not valid JSON, return as string
+      return JSON.parse(cleanState) as unknown;
+    } catch {
       return cleanState;
     }
   }
@@ -285,15 +320,22 @@ export const removeMachine = (machineId: string) => {
  * @param machineId Optional custom machine ID, defaults to actor.id
  */
 export const logActor = (
-  actor: { id: string; subscribe: (callback: (snapshot: any) => void) => void },
+  actor: {
+    id: string;
+    subscribe: (callback: (snapshot: { value: unknown; context?: unknown }) => void) => void;
+  },
   machineId?: string,
 ) => {
   const id = machineId || actor.id;
 
   // Subscribe to the actor's state changes
-  actor.subscribe((snapshot: any) => {
+  actor.subscribe((snapshot) => {
     const { context } = snapshot;
-    logMachine(id, `State: ${JSON.stringify(snapshot.value)}`, context);
+    logMachine(
+      id,
+      `State: ${JSON.stringify(snapshot.value)}`,
+      (context ?? undefined) as Record<string, unknown> | undefined,
+    );
   });
 };
 

@@ -84,6 +84,15 @@ export interface WithdrawalsData {
   }>;
 }
 
+export interface BeaconSlotProcessingData {
+  withdrawalRewards?: string[];
+  clDeposits?: string[];
+  clVoluntaryExits?: string[];
+  elDeposits?: string[];
+  elWithdrawals?: string[];
+  elConsolidations?: string[];
+}
+
 export interface CheckSlotReadyInput {
   slot: number;
 }
@@ -118,6 +127,7 @@ export const getSlot = fromPromise(async ({ input }: { input: CheckSlotProcessed
 /**
  * Actor to check if a slot is ready to be processed
  * based on CONSENSUS_DELAY_SLOTS_TO_HEAD
+ * TODO: delaySlotsToHead has to be handled on beaconTime class
  */
 export const checkSlotReady = fromPromise(async ({ input }: { input: CheckSlotReadyInput }) => {
   const currentSlot = getSlotNumberFromTimestamp(Date.now());
@@ -477,7 +487,14 @@ export const findMinUnprocessedSlotInEpoch = fromPromise(
  * Mocked actor to process CL deposits from beacon block
  */
 export const processClDeposits = fromPromise(
-  async ({ input }: { input: { slot: number; deposits: any[] } }) => {
+  async ({
+    input,
+  }: {
+    input: {
+      slot: number;
+      deposits: Block['data']['message']['body']['deposits'];
+    };
+  }) => {
     // Mock implementation - return array of strings
     console.log(
       `Processing CL deposits for slot ${input.slot}, found ${input.deposits.length} deposits`,
@@ -490,7 +507,14 @@ export const processClDeposits = fromPromise(
  * Mocked actor to process CL voluntary exits from beacon block
  */
 export const processClVoluntaryExits = fromPromise(
-  async ({ input }: { input: { slot: number; voluntaryExits: any[] } }) => {
+  async ({
+    input,
+  }: {
+    input: {
+      slot: number;
+      voluntaryExits: Block['data']['message']['body']['voluntary_exits'];
+    };
+  }) => {
     // Mock implementation - return array of strings
     console.log(
       `Processing CL voluntary exits for slot ${input.slot}, found ${input.voluntaryExits.length} exits`,
@@ -503,7 +527,14 @@ export const processClVoluntaryExits = fromPromise(
  * Mocked actor to process EL deposits from execution payload
  */
 export const processElDeposits = fromPromise(
-  async ({ input }: { input: { slot: number; executionPayload: any } }) => {
+  async ({
+    input,
+  }: {
+    input: {
+      slot: number;
+      executionPayload: Block['data']['message']['body']['execution_payload'];
+    };
+  }) => {
     // Mock implementation - return array of strings
     console.log(`Processing EL deposits for slot ${input.slot}`);
     return [`el_deposit_${input.slot}_0`, `el_deposit_${input.slot}_1`];
@@ -514,7 +545,14 @@ export const processElDeposits = fromPromise(
  * Mocked actor to process EL withdrawals from execution payload
  */
 export const processElWithdrawals = fromPromise(
-  async ({ input }: { input: { slot: number; withdrawals: any[] } }) => {
+  async ({
+    input,
+  }: {
+    input: {
+      slot: number;
+      withdrawals: Block['data']['message']['body']['execution_payload']['withdrawals'];
+    };
+  }) => {
     // Mock implementation - return array of strings
     console.log(
       `Processing EL withdrawals for slot ${input.slot}, found ${input.withdrawals.length} withdrawals`,
@@ -527,7 +565,14 @@ export const processElWithdrawals = fromPromise(
  * Mocked actor to process EL consolidations from execution payload
  */
 export const processElConsolidations = fromPromise(
-  async ({ input }: { input: { slot: number; executionPayload: any } }) => {
+  async ({
+    input,
+  }: {
+    input: {
+      slot: number;
+      executionPayload: Block['data']['message']['body']['execution_payload'];
+    };
+  }) => {
     // Mock implementation - return array of strings
     console.log(`Processing EL consolidations for slot ${input.slot}`);
     return [`el_consolidation_${input.slot}_0`];
@@ -538,7 +583,14 @@ export const processElConsolidations = fromPromise(
  * Actor to update slot with beacon data in database
  */
 export const updateSlotWithBeaconData = fromPromise(
-  async ({ input }: { input: { slot: number; beaconBlockData: any } }) => {
+  async ({
+    input,
+  }: {
+    input: {
+      slot: number;
+      beaconBlockData: BeaconSlotProcessingData;
+    };
+  }) => {
     const { slot, beaconBlockData } = input;
 
     if (!beaconBlockData) {

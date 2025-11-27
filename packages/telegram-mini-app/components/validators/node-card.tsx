@@ -11,7 +11,6 @@ interface NodeCardProps {
 }
 
 export default function NodeCard({ node, onClick }: NodeCardProps) {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _activeValidators = node.validators.filter((v) => v.status === 'active').length;
   const inactiveValidators = node.validators.filter((v) => v.status === 'inactive').length;
 

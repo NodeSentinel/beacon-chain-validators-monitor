@@ -17,7 +17,7 @@ import { ValidatorControllerHelpers } from '@/src/services/consensus/controllers
 import { EpochStorage } from '@/src/services/consensus/storage/epoch.js';
 import { ValidatorsStorage } from '@/src/services/consensus/storage/validators.js';
 import { GetCommittees } from '@/src/services/consensus/types.js';
-import { BeaconTime } from '@/src/services/consensus/utils/time.js';
+import { BeaconTime } from '@/src/services/consensus/utils/beaconTime.js';
 
 /**
  * Note: Mocked data from this tests was taken from Gnosis chain.
@@ -227,6 +227,9 @@ describe('Epoch Processor E2E Tests', () => {
       expect(epoch1525790Reward549419!.target.toString()).toBe('70458');
       expect(epoch1525790Reward549419!.source.toString()).toBe('37886');
 
+      // Verify that epoch 1525791 rewards exist for validator 549419
+      expect(epoch1525791Reward549419).toBeDefined();
+
       expect(dbHourlyStats.length).toBeGreaterThan(0);
 
       // Verify validator 549417 stats
@@ -287,14 +290,14 @@ describe('Epoch Processor E2E Tests', () => {
         await epochStorage.createEpochs([1529553]);
       });
 
-      it('should throw error if committees already fetched', async () => {
+      it('should return early if committees already fetched', async () => {
         // Mark epoch as committeesFetched using epochStorage
         await epochStorage.updateCommitteesFetched(1529553);
 
-        // Should throw error
-        await expect(epochControllerWithMock.fetchCommittees(1529553)).rejects.toThrow(
-          'Committees for epoch 1529553 already fetched',
-        );
+        // When committees are already fetched, the controller should be idempotent:
+        // it should resolve successfully and not call the beacon client again.
+        await expect(epochControllerWithMock.fetchCommittees(1529553)).resolves.toBeUndefined();
+        expect(mockBeaconClient.getCommittees).not.toHaveBeenCalled();
       });
     });
 

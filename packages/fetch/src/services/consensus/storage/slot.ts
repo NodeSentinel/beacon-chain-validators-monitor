@@ -776,12 +776,6 @@ export class SlotStorage {
    * Returns all rewards for the validator in that hour
    */
   async getSyncCommitteeRewardsForValidator(validatorIndex: number, datetime: Date) {
-    // Extract hour from datetime
-    const hour = datetime.getUTCHours();
-    const date = new Date(
-      Date.UTC(datetime.getUTCFullYear(), datetime.getUTCMonth(), datetime.getUTCDate()),
-    );
-
     // Get all slots in that hour by checking slot timestamps
     // We need to find slots that fall within the hour window
     const startOfHour = new Date(datetime);

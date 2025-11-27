@@ -1,7 +1,7 @@
 import ms from 'ms';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
-import { BeaconTime } from './time.js';
+import { BeaconTime } from './beaconTime.js';
 
 import { ethereumConfig, gnosisConfig } from '@/src/config/chain.js';
 
@@ -302,5 +302,63 @@ describe('BeaconTime', () => {
       expect(range.startSlot).toBe(0);
       expect(range.endSlot).toBe(10);
     });
+  });
+});
+
+describe('Queryable slots and delays (via unified methods)', () => {
+  const SLOT_MS = 2; // keep very small to avoid slow tests if a wait happens
+  const beaconTime = new BeaconTime({
+    genesisTimestamp: 0,
+    slotDurationMs: SLOT_MS,
+    slotsPerEpoch: 32,
+    epochsPerSyncCommitteePeriod: 256,
+    lookbackSlot: 32,
+    delaySlotsToHead: 2,
+  });
+
+  test('hasSlotStarted should respect slot start timestamp', () => {
+    vi.useFakeTimers();
+    // With delay=2, effective start for slot 5 is slot 7
+    const slot5EffectiveStart = beaconTime.getTimestampFromSlotNumber(5 + 2); // 7 * SLOT_MS
+    vi.setSystemTime(slot5EffectiveStart - 1);
+    expect(beaconTime.hasSlotStarted(5)).toBe(false);
+    vi.setSystemTime(slot5EffectiveStart);
+    expect(beaconTime.hasSlotStarted(5)).toBe(true);
+    vi.useRealTimers();
+  });
+
+  test('waitUntilSlotStart resolves immediately when already past effective start', async () => {
+    vi.useFakeTimers();
+    // For slot 7 and delay=2, effective start at slot 9
+    const nowAtEffective = beaconTime.getTimestampFromSlotNumber(7 + 2);
+    vi.setSystemTime(nowAtEffective);
+    const promise = beaconTime.waitUntilSlotStart(7);
+    // Should resolve without advancing timers
+    await expect(promise).resolves.toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  test('waitUntilSlotStart waits until effective start when before it', async () => {
+    vi.useFakeTimers();
+    // slot 10, delay=2 => effective slot 12
+    const beforeEffectiveTs = beaconTime.getTimestampFromSlotNumber(11); // currentSlot = 11
+    const atEffectiveTs = beaconTime.getTimestampFromSlotNumber(12); // currentSlot = 12
+    vi.setSystemTime(beforeEffectiveTs);
+    const promise = beaconTime.waitUntilSlotStart(10);
+    // advance by less than needed
+    await Promise.resolve(); // flush microtasks
+    vi.advanceTimersByTime(1 * SLOT_MS - 1);
+    // still pending
+    let settled = false;
+    promise.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    // advance to effective time
+    const remaining = atEffectiveTs - (beforeEffectiveTs + (1 * SLOT_MS - 1));
+    vi.advanceTimersByTime(remaining);
+    await expect(promise).resolves.toBeUndefined();
+    vi.useRealTimers();
   });
 });

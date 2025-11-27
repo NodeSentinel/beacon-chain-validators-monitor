@@ -1,3 +1,5 @@
+import { AxiosError } from 'axios';
+
 import { ReliableRequestClient } from '@/src/services/consensus/utils/reliableRequestClient.js';
 
 /**
@@ -93,7 +95,7 @@ export class TestReliableClient extends ReliableRequestClient {
     retries: number,
     url: string,
     nodeType: 'full' | 'archive',
-    errorHandler?: (error: any) => T | undefined,
+    errorHandler?: (error: AxiosError<{ message: string }>) => T | undefined,
   ): Promise<T> {
     const pRetry = await import('p-retry');
     try {
@@ -112,7 +114,7 @@ export class TestReliableClient extends ReliableRequestClient {
     } catch (error) {
       // Try to handle the error if handler provided
       if (errorHandler) {
-        const handled = errorHandler(error);
+        const handled = errorHandler(error as AxiosError<{ message: string }>);
         if (handled !== undefined) {
           return handled;
         }

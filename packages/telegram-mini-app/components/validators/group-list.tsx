@@ -7,6 +7,7 @@ import GroupOverview from './group-overview';
 
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import type { Group, GroupFilter, Stats } from '@/types/validator';
+
 interface GroupListProps {
   groups: Group[];
   selectedFilter: GroupFilter;
@@ -15,7 +16,6 @@ interface GroupListProps {
 }
 
 function getAggregatedGroup(groups: Group[]): Group {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _totalValidators = groups.reduce((sum, group) => sum + group.validators.length, 0);
   const allValidators = groups.flatMap((group) => group.validators);
   const totalBalance = groups.reduce((sum, group) => sum + group.totalBalance, 0);

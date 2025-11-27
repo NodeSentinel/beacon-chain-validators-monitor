@@ -1,5 +1,6 @@
-import { pino } from 'pino'
-import { config } from '@/src/config.js'
+import { pino } from 'pino';
+
+import { config } from '@/src/config.js';
 
 export const logger = pino({
   level: config.logLevel,
@@ -26,6 +27,6 @@ export const logger = pino({
           ]),
     ],
   },
-})
+});
 
-export type Logger = typeof logger
+export type Logger = typeof logger;

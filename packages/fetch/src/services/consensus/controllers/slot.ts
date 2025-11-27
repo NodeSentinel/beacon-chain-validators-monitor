@@ -1,9 +1,7 @@
-import { Prisma } from '@beacon-indexer/db';
-
 import { BeaconClient } from '../beacon.js';
 import { SlotStorage } from '../storage/slot.js';
 import type { Block, Attestation } from '../types.js';
-import { BeaconTime } from '../utils/time.js';
+import { BeaconTime } from '../utils/beaconTime.js';
 
 import { SlotControllerHelpers } from './helpers/slotControllerHelpers.js';
 
@@ -68,6 +66,7 @@ export class SlotController extends SlotControllerHelpers {
 
   /**
    * Check if a slot is ready to be processed based on CONSENSUS_DELAY_SLOTS_TO_HEAD
+   * TODO: delaySlotsToHead has to be handled on beaconTime class
    */
   async canSlotBeProcessed(slot: number, delaySlotsToHead: number) {
     const currentSlot = this.beaconTime.getSlotNumberFromTimestamp(Date.now());

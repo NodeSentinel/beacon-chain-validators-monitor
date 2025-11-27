@@ -18,11 +18,7 @@ interface EventsFeedProps {
   gnoPrice: number;
 }
 
-export default function EventsFeed({
-  events,
-  validators: _validators,
-  gnoPrice: _gnoPrice,
-}: EventsFeedProps) {
+export default function EventsFeed({ events, validators: _validators, gnoPrice }: EventsFeedProps) {
   const [validatorFilter, setValidatorFilter] = useState<string>('');
 
   const filterEventsByValidator = (eventList: ValidatorEvent[]) => {

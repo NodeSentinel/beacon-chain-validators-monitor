@@ -50,7 +50,7 @@ export const gnosisConfig: ChainConfig = {
     slotsPerEpoch: 16,
     epochsPerSyncCommitteePeriod: 256,
     maxAttestationDelay: 5,
-    delaySlotsToHead: 2,
+    delaySlotsToHead: 3,
     apiRequestPerSecond: 10,
   },
 };

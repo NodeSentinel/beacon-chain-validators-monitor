@@ -3,8 +3,8 @@ FROM node:22-alpine
 # Install system dependencies (openssl for Prisma, tzdata for timezone support)
 RUN apk add --no-cache openssl tzdata
 
-# Install pnpm globally
-RUN npm install -g pnpm
+# Install pnpm globally (pinned to match repo)
+RUN npm install -g pnpm@9.2.0
 
 WORKDIR /app
 
