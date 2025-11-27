@@ -1,5 +1,3 @@
-import { Prisma } from '@beacon-indexer/db';
-
 import { BeaconClient } from '../beacon.js';
 import { SlotStorage } from '../storage/slot.js';
 import type { Block, Attestation } from '../types.js';

@@ -12,7 +12,10 @@ const prisma = getPrisma();
 async function updateValidatorStatusTask(logger: CustomLogger) {
   try {
     //const { maxSafeSlotToQuery: maxSlotToQuery, syncing } = await geSlotsInfo();
-    const { maxSafeSlotToQuery: maxSlotToQuery, syncing } = {} as any;
+    const { maxSafeSlotToQuery: maxSlotToQuery, syncing } = {} as {
+      maxSafeSlotToQuery: number;
+      syncing: boolean;
+    };
 
     if (syncing) {
       logger.info('Syncing, skipping validator status update');

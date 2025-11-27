@@ -227,6 +227,9 @@ describe('Epoch Processor E2E Tests', () => {
       expect(epoch1525790Reward549419!.target.toString()).toBe('70458');
       expect(epoch1525790Reward549419!.source.toString()).toBe('37886');
 
+      // Verify that epoch 1525791 rewards exist for validator 549419
+      expect(epoch1525791Reward549419).toBeDefined();
+
       expect(dbHourlyStats.length).toBeGreaterThan(0);
 
       // Verify validator 549417 stats
