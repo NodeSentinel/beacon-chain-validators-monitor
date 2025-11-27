@@ -1,13 +1,14 @@
-import type { Context } from '@/src/bot/context.js'
-import { Composer } from 'grammy'
-import { logHandle } from '@/src/bot/helpers/logging.js'
+import { Composer } from 'grammy';
 
-const composer = new Composer<Context>()
+import type { Context } from '@/src/bot/context.js';
+import { logHandle } from '@/src/bot/helpers/logging.js';
 
-const feature = composer.chatType('private')
+const composer = new Composer<Context>();
+
+const feature = composer.chatType('private');
 
 feature.command('start', logHandle('command-start'), (ctx) => {
-  return ctx.reply(ctx.t('welcome'))
-})
+  return ctx.reply(ctx.t('welcome'));
+});
 
-export { composer as welcomeFeature }
+export { composer as welcomeFeature };

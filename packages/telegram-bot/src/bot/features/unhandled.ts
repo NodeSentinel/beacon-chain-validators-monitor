@@ -1,17 +1,18 @@
-import type { Context } from '@/src/bot/context.js'
-import { Composer } from 'grammy'
-import { logHandle } from '@/src/bot/helpers/logging.js'
+import { Composer } from 'grammy';
 
-const composer = new Composer<Context>()
+import type { Context } from '@/src/bot/context.js';
+import { logHandle } from '@/src/bot/helpers/logging.js';
 
-const feature = composer.chatType('private')
+const composer = new Composer<Context>();
+
+const feature = composer.chatType('private');
 
 feature.on('message', logHandle('unhandled-message'), (ctx) => {
-  return ctx.reply(ctx.t('unhandled'))
-})
+  return ctx.reply(ctx.t('unhandled'));
+});
 
 feature.on('callback_query', logHandle('unhandled-callback-query'), (ctx) => {
-  return ctx.answerCallbackQuery()
-})
+  return ctx.answerCallbackQuery();
+});
 
-export { composer as unhandledFeature }
+export { composer as unhandledFeature };

@@ -3,7 +3,7 @@ import antfu from '@antfu/eslint-config';
 export default antfu(
   {},
   {
-    files: ['src/**/*.{ts,js}'],
+    files: ['**/*.{ts,js}'],
     languageOptions: {
       globals: {
         // Allow Node.js globals in this package
@@ -16,6 +16,8 @@ export default antfu(
     rules: {
       // Allow using global `process` in Node context
       'node/prefer-global/process': 'off',
+      // Enforce semicolons to match Prettier config (semi: true)
+      'style/semi': ['error', 'always'],
     },
   },
 );

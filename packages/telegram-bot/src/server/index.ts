@@ -1,44 +1,38 @@
-import type { Bot } from '@/src/bot/index.js'
-import type { Config } from '@/src/config.js'
-import type { Logger } from '@/src/logger.js'
-import type { Env } from '@/src/server/environment.js'
-import { serve } from '@hono/node-server'
-import { webhookCallback } from 'grammy'
-import { Hono } from 'hono'
-import { HTTPException } from 'hono/http-exception'
-import { getPath } from 'hono/utils/url'
-import { setLogger } from '@/src/server/middlewares/logger.js'
-import { requestId } from '@/src/server/middlewares/request-id.js'
-import { requestLogger } from '@/src/server/middlewares/request-logger.js'
+import { serve } from '@hono/node-server';
+import { webhookCallback } from 'grammy';
+import { Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
+import { getPath } from 'hono/utils/url';
+
+import type { Bot } from '@/src/bot/index.js';
+import type { Config } from '@/src/config.js';
+import type { Logger } from '@/src/logger.js';
+import type { Env } from '@/src/server/environment.js';
+import { setLogger } from '@/src/server/middlewares/logger.js';
+import { requestId } from '@/src/server/middlewares/request-id.js';
+import { requestLogger } from '@/src/server/middlewares/request-logger.js';
 
 interface Dependencies {
-  bot: Bot
-  config: Config
-  logger: Logger
+  bot: Bot;
+  config: Config;
+  logger: Logger;
 }
 
 export function createServer(dependencies: Dependencies) {
-  const {
-    bot,
-    config,
-    logger,
-  } = dependencies
+  const { bot, config, logger } = dependencies;
 
-  const server = new Hono<Env>()
+  const server = new Hono<Env>();
 
-  server.use(requestId())
-  server.use(setLogger(logger))
-  if (config.isDebug)
-    server.use(requestLogger())
+  server.use(requestId());
+  server.use(setLogger(logger));
+  if (config.isDebug) server.use(requestLogger());
 
   server.onError(async (error, c) => {
     if (error instanceof HTTPException) {
-      if (error.status < 500)
-        c.var.logger.info(error)
-      else
-        c.var.logger.error(error)
+      if (error.status < 500) c.var.logger.info(error);
+      else c.var.logger.error(error);
 
-      return error.getResponse()
+      return error.getResponse();
     }
 
     // unexpected error
@@ -46,16 +40,16 @@ export function createServer(dependencies: Dependencies) {
       err: error,
       method: c.req.raw.method,
       path: getPath(c.req.raw),
-    })
+    });
     return c.json(
       {
         error: 'Oops! Something went wrong.',
       },
       500,
-    )
-  })
+    );
+  });
 
-  server.get('/', c => c.json({ status: true }))
+  server.get('/', (c) => c.json({ status: true }));
 
   if (config.isWebhookMode) {
     server.post(
@@ -63,16 +57,16 @@ export function createServer(dependencies: Dependencies) {
       webhookCallback(bot, 'hono', {
         secretToken: config.botWebhookSecret,
       }),
-    )
+    );
   }
 
-  return server
+  return server;
 }
 
-export type Server = Awaited<ReturnType<typeof createServer>>
+export type Server = Awaited<ReturnType<typeof createServer>>;
 
-export function createServerManager(server: Server, options: { host: string, port: number }) {
-  let handle: undefined | ReturnType<typeof serve>
+export function createServerManager(server: Server, options: { host: string; port: number }) {
+  let handle: undefined | ReturnType<typeof serve>;
   return {
     start() {
       return new Promise<{ url: string }>((resolve) => {
@@ -82,21 +76,21 @@ export function createServerManager(server: Server, options: { host: string, por
             hostname: options.host,
             port: options.port,
           },
-          info => resolve({
-            url: info.family === 'IPv6'
-              ? `http://[${info.address}]:${info.port}`
-              : `http://${info.address}:${info.port}`,
-          }),
-        )
-      })
+          (info) =>
+            resolve({
+              url:
+                info.family === 'IPv6'
+                  ? `http://[${info.address}]:${info.port}`
+                  : `http://${info.address}:${info.port}`,
+            }),
+        );
+      });
     },
     stop() {
       return new Promise<void>((resolve) => {
-        if (handle)
-          handle.close(() => resolve())
-        else
-          resolve()
-      })
+        if (handle) handle.close(() => resolve());
+        else resolve();
+      });
     },
-  }
+  };
 }

@@ -1,7 +1,7 @@
-import { createEnv } from '@t3-oss/env-core'
-import { z } from 'zod'
+import { createEnv } from '@t3-oss/env-core';
+import { z } from 'zod';
 // Load environment variables from .env file
-import 'dotenv/config'
+import 'dotenv/config';
 
 // Telegram allowed update types
 // https://core.telegram.org/bots/api#update
@@ -29,9 +29,9 @@ const allowedUpdateTypes = [
   'chat_boost',
   'removed_chat_boost',
   'purchased_paid_media',
-] as const
+] as const;
 
-export type AllowedUpdateType = typeof allowedUpdateTypes[number]
+export type AllowedUpdateType = (typeof allowedUpdateTypes)[number];
 
 export const env = createEnv({
   clientPrefix: 'IF_NOT_PROVIDED_IT_FAILS',
@@ -47,19 +47,21 @@ export const env = createEnv({
       .string()
       .default('[]')
       .transform((val) => {
-        const parsed = JSON.parse(val) as string[]
+        const parsed = JSON.parse(val) as string[];
         // Validate that all values are valid update types
         parsed.forEach((update) => {
           if (!allowedUpdateTypes.includes(update as AllowedUpdateType)) {
-            throw new Error(`Invalid update type: ${update}. Must be one of: ${allowedUpdateTypes.join(', ')}`)
+            throw new Error(
+              `Invalid update type: ${update}. Must be one of: ${allowedUpdateTypes.join(', ')}`,
+            );
           }
-        })
-        return parsed as readonly AllowedUpdateType[]
+        });
+        return parsed as readonly AllowedUpdateType[];
       }),
     BOT_ADMINS: z
       .string()
       .default('[]')
-      .transform(val => JSON.parse(val) as number[]),
+      .transform((val) => JSON.parse(val) as number[]),
 
     // Webhook Configuration (only used when BOT_MODE=webhook)
     BOT_WEBHOOK: z.string().url().optional(),
@@ -71,11 +73,11 @@ export const env = createEnv({
     DEBUG: z
       .string()
       .default('false')
-      .transform(val => val === 'true'),
+      .transform((val) => val === 'true'),
     LOG_LEVEL: z
       .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'])
       .default('info'),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
-})
+});

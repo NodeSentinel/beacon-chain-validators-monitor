@@ -79,6 +79,8 @@ export default tseslint.config(
       '**/.cache/**',
       '**/public/**',
       // Package-specific patterns
+      'packages/db/dist/**',
+      'packages/db/generated/**',
       'packages/fetch/dist/**',
     ],
   },
