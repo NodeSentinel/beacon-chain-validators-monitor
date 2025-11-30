@@ -285,8 +285,14 @@ export class SlotControllerHelpers {
    * Prepare block rewards for processing
    * Following the same pattern as epoch rewards
    */
-  protected prepareBlockRewards(blockRewards: BlockRewards | 'SLOT MISSED'): {
-    proposerIndex: number;
+  protected prepareBlockRewards(
+    blockRewards: BlockRewards | 'SLOT MISSED',
+    hour: number,
+    date: string,
+  ): {
+    validatorIndex: number;
+    date: Date;
+    hour: number;
     blockReward: bigint;
   } | null {
     if (blockRewards === 'SLOT MISSED' || !blockRewards.data) {
@@ -294,7 +300,9 @@ export class SlotControllerHelpers {
     }
 
     return {
-      proposerIndex: Number(blockRewards.data.proposer_index),
+      validatorIndex: Number(blockRewards.data.proposer_index),
+      date: new Date(date),
+      hour,
       blockReward: BigInt(blockRewards.data.total),
     };
   }

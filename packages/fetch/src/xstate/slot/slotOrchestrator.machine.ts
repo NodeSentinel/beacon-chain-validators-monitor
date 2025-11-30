@@ -25,7 +25,6 @@ export interface SlotOrchestratorContext {
   endSlot: number;
   currentSlot: number | null;
   lookbackSlot: number;
-  slotDuration: number;
 
   slotActor: ActorRefFrom<typeof slotProcessorMachine> | null;
 
@@ -35,7 +34,6 @@ export interface SlotOrchestratorContext {
 export interface SlotOrchestratorInput {
   epoch: number;
   lookbackSlot: number;
-  slotDuration: number;
   slotController: SlotController;
 }
 
@@ -70,9 +68,7 @@ export const slotOrchestratorMachine = setup({
       return params.allSlotsProcessed === true;
     },
   },
-  delays: {
-    slotDurationThird: ({ context }) => context.slotDuration / 3,
-  },
+  delays: {},
 }).createMachine({
   id: 'SlotOrchestrator',
   initial: 'findingNextSlot',
@@ -87,7 +83,6 @@ export const slotOrchestratorMachine = setup({
       currentSlot: null,
       slotActor: null,
       lookbackSlot: input.lookbackSlot,
-      slotDuration: input.slotDuration,
       slotController: input.slotController,
     };
   },
@@ -165,7 +160,6 @@ export const slotOrchestratorMachine = setup({
               input: {
                 epoch: context.epoch,
                 slot: context.currentSlot!,
-                slotDuration: context.slotDuration,
                 lookbackSlot: context.lookbackSlot,
                 slotController: context.slotController,
               },

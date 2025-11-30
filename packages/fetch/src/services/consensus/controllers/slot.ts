@@ -6,7 +6,8 @@ import { BeaconTime } from '../utils/beaconTime.js';
 import { SlotControllerHelpers } from './helpers/slotControllerHelpers.js';
 
 import { EpochStorage } from '@/src/services/consensus/storage/epoch.js';
-import { getUTCDatetimeRoundedToHour } from '@/src/utils/date/index.js';
+import { getBlock as getExecutionBlock } from '@/src/services/execution/endpoints.js';
+import { convertToUTC, getUTCDatetimeRoundedToHour } from '@/src/utils/date/index.js';
 
 /**
  * SlotController - Business logic layer for slot-related operations
@@ -23,6 +24,8 @@ export class SlotController extends SlotControllerHelpers {
 
   /**
    * Get slot by number with processing data
+   * TODO: why is this needed? The epoch should create the slots and we shouldn't reach to this point
+   * if the slot is not created yet.
    */
   async getSlot(slot: number) {
     return this.slotStorage.getSlot(slot);
@@ -120,6 +123,190 @@ export class SlotController extends SlotControllerHelpers {
   }
 
   /**
+   * Check if a slot is ready to be processed based on delay slots to head.
+   */
+  isSlotReady(slot: number) {
+    return { isReady: this.beaconTime.hasSlotStarted(slot) };
+  }
+
+  /**
+   * Wait until a slot is ready to be processed.
+   * Uses beaconTime to calculate exact wait time including delay slots to head.
+   */
+  async waitUntilSlotReady(slot: number) {
+    await this.beaconTime.waitUntilSlotStart(slot);
+  }
+
+  /**
+   * Fetch beacon block data for a slot.
+   */
+  async fetchBeaconBlock(slot: number) {
+    return this.beaconClient.getBlock(slot);
+  }
+
+  /**
+   * Get sync committee validators for an epoch.
+   */
+  async getSyncCommitteeValidators(epoch: number): Promise<string[]> {
+    const validators = await this.slotStorage.getSyncCommitteeValidators(epoch);
+    return validators as string[];
+  }
+
+  /**
+   * Get committee sizes for attestations in a beacon block.
+   * Returns the committee sizes and whether all slots have counts.
+   */
+  async getCommitteeSizesForBlock(slot: number, beaconBlockData: Block) {
+    const attestations = beaconBlockData.data.message.body.attestations || [];
+    const uniqueSlots = [...new Set(attestations.map((att) => parseInt(att.data.slot)))].filter(
+      (s) => s >= this.beaconTime.getLookbackSlot(),
+    );
+
+    if (uniqueSlots.length === 0) {
+      return {
+        committeesCountInSlot: {},
+        allSlotsHaveCounts: false,
+        uniqueSlots: [],
+      };
+    }
+
+    const committeesCountInSlot = await this.slotStorage.getCommitteeSizesForSlots(uniqueSlots);
+
+    const allSlotsHaveCounts = uniqueSlots.every((s) => {
+      const counts = committeesCountInSlot[s];
+      return counts && counts.length > 0;
+    });
+
+    return {
+      committeesCountInSlot,
+      allSlotsHaveCounts,
+      uniqueSlots,
+    };
+  }
+
+  /**
+   * Process attestations from a beacon block.
+   */
+  /**
+   * Process attestations from a beacon block.
+   * Checks if already processed before processing.
+   */
+  async processBlockAttestations(
+    slotNumber: number,
+    attestations: Attestation[],
+    slotCommitteesValidatorsAmounts: Record<number, number[]>,
+  ) {
+    const isAlreadyProcessed = await this.slotStorage.areAttestationsProcessedForSlot(slotNumber);
+    if (isAlreadyProcessed) {
+      return;
+    }
+
+    // Filter out attestations that are older than the oldest lookback slot
+    const filteredAttestations = attestations.filter(
+      (attestation) => +attestation.data.slot >= this.beaconTime.getLookbackSlot(),
+    );
+
+    // Process each attestation and calculate delays using the helper
+    const allUpdates = [];
+    for (const attestation of filteredAttestations) {
+      const updates = this.processAttestation(
+        slotNumber,
+        attestation,
+        slotCommitteesValidatorsAmounts,
+      );
+      allUpdates.push(...updates);
+    }
+
+    // Remove duplicates and keep the one with minimum delay
+    const deduplicatedAttestations = this.deduplicateAttestations(allUpdates);
+
+    // Persist to database
+    await this.slotStorage.saveSlotAttestations(deduplicatedAttestations, slotNumber);
+  }
+
+  /**
+   * Fetch and save block rewards for a slot.
+   * Checks if already fetched before processing.
+   */
+  async fetchBlockRewards(slot: number, timestamp: number) {
+    const isAlreadyFetched = await this.slotStorage.areSlotConsensusRewardsFetched(slot);
+    if (isAlreadyFetched) {
+      return;
+    }
+
+    const blockRewards = await this.beaconClient.getBlockRewards(slot);
+
+    const { date, hour } = convertToUTC(new Date(timestamp * 1000));
+
+    const reward = this.prepareBlockRewards(blockRewards, hour, date);
+
+    await this.slotStorage.saveBlockRewardsAndUpdateSlot(slot, reward);
+  }
+
+  /**
+   * Fetch and save sync committee rewards for a slot.
+   * Checks if already fetched before processing.
+   * Sync committee validators are fetched from the database (guaranteed to exist by epoch processor).
+   */
+  async fetchSyncRewards(slot: number, timestamp: number) {
+    const isAlreadyFetched = await this.slotStorage.isSyncCommitteeFetchedForSlot(slot);
+    if (isAlreadyFetched) {
+      return;
+    }
+
+    const epoch = this.beaconTime.getEpochFromSlot(slot);
+    const syncCommitteeValidators = await this.getSyncCommitteeValidators(epoch);
+
+    const syncCommitteeRewards = await this.beaconClient.getSyncCommitteeRewards(
+      slot,
+      syncCommitteeValidators,
+    );
+
+    if (syncCommitteeRewards === 'SLOT MISSED') {
+      await this.slotStorage.saveSyncRewardsAndUpdateSlot(slot, []);
+      return;
+    }
+
+    const { date, hour } = convertToUTC(new Date(timestamp * 1000));
+
+    const rewards = syncCommitteeRewards.data.map((reward) => ({
+      validatorIndex: Number(reward.validator_index),
+      date: new Date(date),
+      hour,
+      syncCommittee: BigInt(reward.reward),
+    }));
+
+    await this.slotStorage.saveSyncRewardsAndUpdateSlot(slot, rewards);
+  }
+
+  /**
+   * Fetch execution layer rewards for a slot.
+   * Checks if already fetched before processing.
+   */
+  async fetchExecutionRewards(slot: number, blockNumber: number) {
+    const isAlreadyFetched = await this.slotStorage.areExecutionRewardsFetched(slot);
+    if (isAlreadyFetched) {
+      return;
+    }
+
+    const blockInfo = await getExecutionBlock(blockNumber);
+    if (!blockInfo) {
+      throw new Error(`Block ${blockNumber} not found`);
+    }
+
+    await this.slotStorage.saveExecutionRewardsAndUpdateSlot(slot, blockInfo);
+  }
+
+  /**
+   * Format withdrawal rewards from beacon block data.
+   */
+  formatWithdrawalsData(
+    withdrawals: Block['data']['message']['body']['execution_payload']['withdrawals'],
+  ) {
+    return withdrawals.map((w) => `${w.validator_index}:${w.amount}`);
+  }
+
+  /**
    * Fetch and process execution layer rewards
    * TODO: Implement using fetch/src/services/execution/endpoints.ts
    * And move to block controller in service/execution
@@ -189,22 +376,22 @@ export class SlotController extends SlotControllerHelpers {
 
     // Fetch block rewards from beacon chain
     const blockRewards = await this.beaconClient.getBlockRewards(slot);
-    const blockRewardData = this.prepareBlockRewards(blockRewards);
 
-    if (blockRewardData) {
-      const slotTimestamp = await this.beaconTime.getTimestampFromSlotNumber(slot);
-      const datetime = getUTCDatetimeRoundedToHour(slotTimestamp);
-
-      // Process block rewards and aggregate into hourly data
-      await this.slotStorage.processSlotConsensusRewardsForSlot(
-        slot,
-        blockRewardData.proposerIndex,
-        datetime,
-        blockRewardData.blockReward,
-      );
-    } else {
+    if (blockRewards === 'SLOT MISSED' || !blockRewards.data) {
       await this.slotStorage.updateSlotFlags(slot, { consensusRewardsFetched: true });
+      return;
     }
+
+    const slotTimestamp = this.beaconTime.getTimestampFromSlotNumber(slot);
+    const datetime = getUTCDatetimeRoundedToHour(slotTimestamp);
+
+    // Process block rewards and aggregate into hourly data
+    await this.slotStorage.processSlotConsensusRewardsForSlot(
+      slot,
+      Number(blockRewards.data.proposer_index),
+      datetime,
+      BigInt(blockRewards.data.total),
+    );
   }
 
   /**

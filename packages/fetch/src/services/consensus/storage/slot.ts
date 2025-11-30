@@ -20,9 +20,6 @@ export class SlotStorage {
       where: {
         slot: slot,
       },
-      include: {
-        slotProcessedData: true,
-      },
     });
   }
 
@@ -73,6 +70,18 @@ export class SlotStorage {
     });
 
     return res?.attestationsFetched === true;
+  }
+
+  /**
+   * Check if execution rewards have been fetched for a slot
+   */
+  async areExecutionRewardsFetched(slot: number) {
+    const res = await this.prisma.slot.findFirst({
+      where: { slot },
+      select: { executionRewardsFetched: true },
+    });
+
+    return res?.executionRewardsFetched === true;
   }
 
   /**
@@ -432,6 +441,26 @@ export class SlotStorage {
   }
 
   /**
+   * Save execution rewards and update slot flag in a transaction
+   * TODO: move this to execution controller/storage.
+   */
+  async saveExecutionRewardsAndUpdateSlot(
+    slot: number,
+    data: Prisma.ExecutionRewardsUncheckedCreateInput,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.executionRewards.create({
+        data,
+      });
+
+      await tx.slot.update({
+        where: { slot },
+        data: { executionRewardsFetched: true },
+      });
+    });
+  }
+
+  /**
    * Save sync committee rewards to database
    */
   async saveSyncCommitteeRewards(
@@ -504,6 +533,102 @@ export class SlotStorage {
         },
       },
     });
+  }
+
+  /**
+   * Save block rewards and update slot flag in a transaction
+   */
+  async saveBlockRewardsAndUpdateSlot(
+    slot: number,
+    reward: {
+      validatorIndex: number;
+      date: Date;
+      hour: number;
+      blockReward: bigint;
+    } | null,
+  ) {
+    await this.prisma.$transaction(
+      async (tx) => {
+        if (reward) {
+          await tx.hourlyBlockAndSyncRewards.upsert({
+            where: {
+              validatorIndex_date_hour: {
+                validatorIndex: reward.validatorIndex,
+                date: reward.date,
+                hour: reward.hour,
+              },
+            },
+            create: {
+              validatorIndex: reward.validatorIndex,
+              date: reward.date,
+              hour: reward.hour,
+              blockReward: reward.blockReward,
+              syncCommittee: 0n,
+            },
+            update: {
+              blockReward: {
+                increment: reward.blockReward,
+              },
+            },
+          });
+        }
+
+        await tx.slot.upsert({
+          where: { slot },
+          update: { consensusRewardsFetched: true },
+          create: { slot, consensusRewardsFetched: true },
+        });
+      },
+      { timeout: ms('5m') },
+    );
+  }
+
+  /**
+   * Save sync committee rewards and update slot flag in a transaction
+   */
+  async saveSyncRewardsAndUpdateSlot(
+    slot: number,
+    rewards: Array<{
+      validatorIndex: number;
+      date: Date;
+      hour: number;
+      syncCommittee: bigint;
+    }>,
+  ) {
+    await this.prisma.$transaction(
+      async (tx) => {
+        for (const reward of rewards) {
+          await tx.hourlyBlockAndSyncRewards.upsert({
+            where: {
+              validatorIndex_date_hour: {
+                validatorIndex: reward.validatorIndex,
+                date: reward.date,
+                hour: reward.hour,
+              },
+            },
+            create: {
+              validatorIndex: reward.validatorIndex,
+              date: reward.date,
+              hour: reward.hour,
+              syncCommittee: reward.syncCommittee,
+              blockReward: 0n,
+            },
+            update: {
+              syncCommittee: {
+                increment: reward.syncCommittee,
+              },
+            },
+          });
+        }
+
+        await tx.slot.upsert({
+          where: { slot },
+          update: { syncRewardsFetched: true },
+          create: { slot, syncRewardsFetched: true },
+        });
+      },
+      { timeout: ms('5m') },
+    );
   }
 
   /**

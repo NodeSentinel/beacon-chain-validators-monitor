@@ -444,46 +444,6 @@ export const updateWithdrawalsProcessed = fromPromise(
 );
 
 /**
- * Actor to find the next unprocessed slot between startSlot and endSlot
- * If no slots are processed, returns startSlot
- * If all slots are processed, returns null
- */
-export const findMinUnprocessedSlotInEpoch = fromPromise(
-  async ({ input }: { input: { startSlot: number; endSlot: number } }) => {
-    try {
-      const { startSlot, endSlot } = input;
-
-      // Find the first unprocessed slot in the range
-      const unprocessedSlot = await prisma.slot.findFirst({
-        where: {
-          slot: {
-            gte: startSlot,
-            lte: endSlot,
-          },
-          processed: false,
-        },
-        orderBy: {
-          slot: 'asc',
-        },
-        select: {
-          slot: true,
-        },
-      });
-
-      // If no unprocessed slot found, all slots are processed
-      if (!unprocessedSlot) {
-        return null;
-      }
-
-      return unprocessedSlot.slot;
-    } catch (error) {
-      console.error('Error finding next unprocessed slot:', error);
-      throw error;
-    }
-  },
-);
-
-/**
  * Mocked actor to process CL deposits from beacon block
  */
 export const processClDeposits = fromPromise(
