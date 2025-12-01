@@ -16,7 +16,6 @@
  * is considered legacy and should be removed once all consumers have migrated.
  */
 
-import ms from 'ms';
 import { setup, assign, sendParent, fromPromise } from 'xstate';
 
 import { SlotController } from '@/src/services/consensus/controllers/slot.js';
@@ -579,6 +578,47 @@ export const slotProcessorMachine = setup({
                     },
                   },
                 },
+                executionRewards: {
+                  description: 'Fetching execution layer rewards for the slot proposer.',
+                  initial: 'processing',
+                  states: {
+                    processing: {
+                      entry: pinoLog(
+                        ({ context }) => `fetching execution rewards for slot ${context.slot}`,
+                        'SlotProcessor:executionRewards',
+                      ),
+                      invoke: {
+                        src: 'fetchELRewards',
+                        input: ({ context }) => {
+                          const _beaconBlockData = context.beaconBlockData?.rawData as Block;
+                          return {
+                            slotController: context.slotController,
+                            slot: context.slot,
+                            block: Number(
+                              _beaconBlockData.data.message.body.execution_payload.block_number,
+                            ),
+                          };
+                        },
+                        onDone: {
+                          target: 'complete',
+                        },
+                        onError: {
+                          target: 'processing',
+                          actions: ({ event }) => {
+                            console.error('Error fetching execution rewards:', event.error);
+                          },
+                        },
+                      },
+                    },
+                    complete: {
+                      type: 'final',
+                      entry: pinoLog(
+                        ({ context }) => `complete execution rewards for slot ${context.slot}`,
+                        'SlotProcessor:executionRewards',
+                      ),
+                    },
+                  },
+                },
                 blockRewards: {
                   description: 'Fetching block rewards (consensus rewards) for the slot proposer.',
                   initial: 'processing',
@@ -653,57 +693,6 @@ export const slotProcessorMachine = setup({
             },
             complete: {
               type: 'final',
-            },
-          },
-        },
-
-        executionRewards: {
-          description: 'Fetching execution layer rewards for the slot proposer.',
-          initial: 'waitingForBeaconData',
-          states: {
-            waitingForBeaconData: {
-              always: {
-                guard: 'hasBeaconBlockData',
-                target: 'processing',
-              },
-              after: {
-                [ms('1s')]: 'waitingForBeaconData',
-              },
-            },
-            processing: {
-              entry: pinoLog(
-                ({ context }) => `fetching execution rewards for slot ${context.slot}`,
-                'SlotProcessor:executionRewards',
-              ),
-              invoke: {
-                src: 'fetchELRewards',
-                input: ({ context }) => {
-                  const _beaconBlockData = context.beaconBlockData?.rawData as Block;
-                  return {
-                    slotController: context.slotController,
-                    slot: context.slot,
-                    block: Number(
-                      _beaconBlockData.data.message.body.execution_payload.block_number,
-                    ),
-                  };
-                },
-                onDone: {
-                  target: 'complete',
-                },
-                onError: {
-                  target: 'processing',
-                  actions: ({ event }) => {
-                    console.error('Error fetching execution rewards:', event.error);
-                  },
-                },
-              },
-            },
-            complete: {
-              type: 'final',
-              entry: pinoLog(
-                ({ context }) => `complete execution rewards for slot ${context.slot}`,
-                'SlotProcessor:executionRewards',
-              ),
             },
           },
         },
