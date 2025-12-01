@@ -28,10 +28,7 @@
     "type-check": "tsc --noEmit",
     "test": "echo \"No tests for @beacon-indexer/db\""
   },
-  "dependencies": {
-    "@prisma/client": "6.16.2",
-    "prisma": "^6.16.2"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^22.17.2",
     "eslint": "^8.57.1",

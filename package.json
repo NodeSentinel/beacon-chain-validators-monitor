@@ -59,7 +59,9 @@
   },
   "dependencies": {
     "@beacon-indexer/db": "workspace:*",
-    "dotenv": "^16.0.3"
+    "@prisma/client": "6.16.2",
+    "dotenv": "^16.0.3",
+    "prisma": "6.16.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

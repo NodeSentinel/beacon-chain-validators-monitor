@@ -36,7 +36,7 @@ services:
         apk add --no-cache openssl &&
         npm install -g pnpm@9.2.0 &&
         echo 'Waiting for database to be ready...' &&
-        node scripts/setDbUrl.js pnpx prisma migrate deploy --schema=./packages/db/prisma/schema.prisma &&
+        node scripts/setDbUrl.js pnpm exec prisma migrate deploy --schema=./packages/db/prisma/schema.prisma &&
         echo 'Database migration completed successfully!'
       "
     networks:
@@ -62,24 +62,24 @@ services:
     networks:
       - app-network
 
-  telegram_bot:
-    container_name: telegram_bot
-    restart: on-failure
-    env_file:
-      - .env
-      - packages/telegram-bot/.env
-    environment:
-      - DOCKER_ENV=true
-    build:
-      context: .
-      dockerfile: packages/telegram-bot/Dockerfile
-      platforms:
-        - linux/arm64
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    networks:
-      - app-network
+  # telegram_bot:
+  #   container_name: telegram_bot
+  #   restart: on-failure
+  #   env_file:
+  #     - .env
+  #     - packages/telegram-bot/.env
+  #   environment:
+  #     - DOCKER_ENV=true
+  #   build:
+  #     context: .
+  #     dockerfile: packages/telegram-bot/Dockerfile
+  #     platforms:
+  #       - linux/arm64
+  #   depends_on:
+  #     migrate:
+  #       condition: service_completed_successfully
+  #   networks:
+  #     - app-network
 
 networks:
   app-network:
