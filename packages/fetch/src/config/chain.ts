@@ -3,7 +3,7 @@
 
 import ms from 'ms';
 
-export interface ChainConfig {
+type ChainConfig = {
   // Blockchain Configuration
   blockchain: {
     chainId: number;
@@ -20,7 +20,7 @@ export interface ChainConfig {
     delaySlotsToHead: number;
     apiRequestPerSecond: number;
   };
-}
+};
 
 // Ethereum Mainnet Configuration
 export const ethereumConfig: ChainConfig = {

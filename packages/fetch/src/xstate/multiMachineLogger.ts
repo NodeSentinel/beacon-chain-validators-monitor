@@ -143,7 +143,9 @@ export class MultiMachineLogger {
           status: machine.isFinal ? 'final' : 'active',
           lastUpdate: machine.currentLog.timestamp,
           state: this.parseState(machine.currentLog.state),
-          context: machine.currentLog.context || null,
+          context: machine.currentLog.context
+            ? this.cleanContext(machine.currentLog.context)
+            : null,
           isFinal: machine.isFinal,
         };
       } else {
@@ -231,7 +233,9 @@ export class MultiMachineLogger {
             previous?: unknown;
             type?: string;
           },
-          context: machine.currentLog.context ?? null,
+          context: machine.currentLog.context
+            ? this.cleanContext(machine.currentLog.context)
+            : null,
         };
       } else {
         finalStatus.machines[machineId] = {
@@ -270,6 +274,108 @@ export class MultiMachineLogger {
       return JSON.parse(cleanState) as unknown;
     } catch {
       return cleanState;
+    }
+  }
+
+  /**
+   * Clean context data to remove circular references and non-serializable objects
+   */
+  private cleanContext(context: unknown): Record<string, unknown> | null {
+    if (!context || typeof context !== 'object') {
+      return null;
+    }
+
+    const cleaned: Record<string, unknown> = {};
+    const seen = new WeakSet();
+
+    const cleanValue = (value: unknown): unknown => {
+      // Handle primitives
+      if (value === null || value === undefined) {
+        return null;
+      }
+      if (typeof value !== 'object') {
+        return value;
+      }
+
+      // Handle circular references
+      if (seen.has(value as object)) {
+        return '[Circular]';
+      }
+
+      // Skip functions and non-serializable objects
+      if (value instanceof Function) {
+        return '[Function]';
+      }
+      if (value instanceof Error) {
+        return {
+          name: value.name,
+          message: value.message,
+          stack: value.stack,
+        };
+      }
+
+      // Handle arrays
+      if (Array.isArray(value)) {
+        seen.add(value);
+        return value.map((item) => cleanValue(item));
+      }
+
+      // Handle objects - skip complex objects that might have circular refs
+      if (
+        value instanceof Date ||
+        value instanceof RegExp ||
+        value instanceof Map ||
+        value instanceof Set
+      ) {
+        return String(value);
+      }
+
+      // Check for common non-serializable patterns
+      const obj = value as Record<string, unknown>;
+      if (
+        '_originalClient' in obj ||
+        'subscribe' in obj ||
+        'getSnapshot' in obj ||
+        'send' in obj ||
+        'id' in obj
+      ) {
+        // This looks like an XState actor or similar complex object
+        // Only include safe properties
+        const safe: Record<string, unknown> = {};
+        if ('id' in obj && typeof obj.id === 'string') {
+          safe.id = obj.id;
+        }
+        if ('type' in obj && typeof obj.type === 'string') {
+          safe.type = obj.type;
+        }
+        return safe;
+      }
+
+      // Recursively clean object properties
+      seen.add(value);
+      const cleanedObj: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(obj)) {
+        // Skip internal/private properties
+        if (key.startsWith('_') || key === 'subscribe' || key === 'send') {
+          continue;
+        }
+        try {
+          cleanedObj[key] = cleanValue(val);
+        } catch {
+          // Skip properties that can't be cleaned
+          cleanedObj[key] = '[Non-serializable]';
+        }
+      }
+      return cleanedObj;
+    };
+
+    try {
+      const result = cleanValue(context);
+      return typeof result === 'object' && result !== null && !Array.isArray(result)
+        ? (result as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
     }
   }
 }
@@ -314,6 +420,109 @@ export const removeMachine = (machineId: string) => {
 };
 
 /**
+ * Clean context data to remove circular references and non-serializable objects
+ * Helper function to clean context before serialization
+ */
+function cleanContextForLogging(context: unknown): Record<string, unknown> | undefined {
+  if (!context || typeof context !== 'object') {
+    return undefined;
+  }
+
+  const cleaned: Record<string, unknown> = {};
+  const seen = new WeakSet();
+
+  const cleanValue = (value: unknown): unknown => {
+    // Handle primitives
+    if (value === null || value === undefined) {
+      return null;
+    }
+    if (typeof value !== 'object') {
+      return value;
+    }
+
+    // Handle circular references
+    if (seen.has(value as object)) {
+      return '[Circular]';
+    }
+
+    // Skip functions and non-serializable objects
+    if (value instanceof Function) {
+      return '[Function]';
+    }
+    if (value instanceof Error) {
+      return {
+        name: value.name,
+        message: value.message,
+        stack: value.stack,
+      };
+    }
+
+    // Handle arrays
+    if (Array.isArray(value)) {
+      seen.add(value);
+      return value.map((item) => cleanValue(item));
+    }
+
+    // Handle objects - skip complex objects that might have circular refs
+    if (
+      value instanceof Date ||
+      value instanceof RegExp ||
+      value instanceof Map ||
+      value instanceof Set
+    ) {
+      return String(value);
+    }
+
+    // Check for common non-serializable patterns
+    const obj = value as Record<string, unknown>;
+    if (
+      '_originalClient' in obj ||
+      'subscribe' in obj ||
+      'getSnapshot' in obj ||
+      'send' in obj ||
+      'id' in obj
+    ) {
+      // This looks like an XState actor or similar complex object
+      // Only include safe properties
+      const safe: Record<string, unknown> = {};
+      if ('id' in obj && typeof obj.id === 'string') {
+        safe.id = obj.id;
+      }
+      if ('type' in obj && typeof obj.type === 'string') {
+        safe.type = obj.type;
+      }
+      return safe;
+    }
+
+    // Recursively clean object properties
+    seen.add(value);
+    const cleanedObj: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(obj)) {
+      // Skip internal/private properties
+      if (key.startsWith('_') || key === 'subscribe' || key === 'send') {
+        continue;
+      }
+      try {
+        cleanedObj[key] = cleanValue(val);
+      } catch {
+        // Skip properties that can't be cleaned
+        cleanedObj[key] = '[Non-serializable]';
+      }
+    }
+    return cleanedObj;
+  };
+
+  try {
+    const result = cleanValue(context);
+    return typeof result === 'object' && result !== null && !Array.isArray(result)
+      ? (result as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Automatically log an actor's state and context
  * This function handles both initial registration and continuous state updates
  * @param actor The XState actor to log
@@ -331,11 +540,9 @@ export const logActor = (
   // Subscribe to the actor's state changes
   actor.subscribe((snapshot) => {
     const { context } = snapshot;
-    logMachine(
-      id,
-      `State: ${JSON.stringify(snapshot.value)}`,
-      (context ?? undefined) as Record<string, unknown> | undefined,
-    );
+    // Clean context before logging to avoid circular references
+    const cleanedContext = cleanContextForLogging(context);
+    logMachine(id, `State: ${JSON.stringify(snapshot.value)}`, cleanedContext);
   });
 };
 

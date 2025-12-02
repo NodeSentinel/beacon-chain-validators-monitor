@@ -16,12 +16,78 @@ import { getMultiMachineLogger } from '@/src/xstate/multiMachineLogger.js';
 
 const logger = createLogger('index file');
 
+// Build database URL with proper query parameter handling
+const databaseUrl = env.DATABASE_URL.includes('?')
+  ? `${env.DATABASE_URL}&pool_timeout=0&connect_timeout=10`
+  : `${env.DATABASE_URL}?pool_timeout=0&connect_timeout=10`;
+
 const prisma = new PrismaClient({
-  datasourceUrl: `${env.DATABASE_URL}&pool_timeout=0`,
+  datasources: {
+    db: {
+      url: databaseUrl,
+    },
+  },
+  log: [
+    {
+      emit: 'event',
+      level: 'error',
+    },
+  ],
+});
+
+// Log Prisma errors for debugging
+prisma.$on('error' as never, (e: { message: string; target?: string }) => {
+  logger.error('Prisma error:', e);
+});
+
+// Cleanup function to ensure Prisma disconnects properly
+async function cleanup() {
+  try {
+    await prisma.$disconnect();
+    logger.info('Database disconnected successfully');
+  } catch (error) {
+    logger.error('Error disconnecting from database:', error);
+  }
+  getMultiMachineLogger().done();
+}
+
+// Handle graceful shutdown signals
+const shutdown = async (signal: string) => {
+  logger.info(`Received ${signal}, shutting down gracefully...`);
+  await cleanup();
+  process.exit(0);
+};
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+// Handle uncaught exceptions and unhandled rejections
+process.on('uncaughtException', async (error) => {
+  logger.error('Uncaught exception:', error);
+  await cleanup();
+  process.exit(1);
+});
+
+process.on('unhandledRejection', async (reason, promise) => {
+  logger.error('Unhandled rejection at:', { promise, reason });
+  await cleanup();
+  process.exit(1);
 });
 
 async function main() {
-  await prisma.$connect();
+  try {
+    await prisma.$connect();
+    logger.info('Database connected successfully');
+  } catch (error) {
+    logger.error('Failed to connect to database:', error);
+    // Try to disconnect if connection partially succeeded
+    try {
+      await prisma.$disconnect();
+    } catch {
+      // Ignore disconnect errors if connection failed
+    }
+    throw error;
+  }
 
   // Initialize dependencies
   const beaconClient = new BeaconClient({
@@ -65,19 +131,17 @@ async function main() {
     beaconTime,
     chainConfig.beacon.slotDuration,
     slotController,
+    validatorsController,
   );
-
-  // Handle graceful shutdown
-  process.on('SIGINT', () => {
-    getMultiMachineLogger().done();
-    process.exit(0);
-  });
 }
 
-main()
-  .catch((e) => {
-    logger.error('', e);
-    getMultiMachineLogger().done();
-    process.exit(1);
-  })
-  .finally(() => prisma.$disconnect());
+main().catch((e) => {
+  logger.error('', e);
+  cleanup()
+    .then(() => {
+      process.exit(1);
+    })
+    .catch(() => {
+      process.exit(1);
+    });
+});

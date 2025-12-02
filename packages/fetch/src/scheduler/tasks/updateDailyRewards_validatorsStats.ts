@@ -21,7 +21,7 @@ async function updateDailyRewardsTask(logger: CustomLogger) {
       
       user_validators AS (
         SELECT DISTINCT "B" as validator_id
-        FROM "_UserToValidator"
+        FROM _user_to_validator
       ),
       
       -------------------------------------
@@ -84,8 +84,8 @@ async function updateDailyRewardsTask(logger: CustomLogger) {
         SELECT 
           uv."B" as validator_id,
           COALESCE(SUM(CAST(er.amount AS BIGINT)), 0) as daily_el_rewards
-        FROM "_UserToValidator" uv
-        JOIN "_FeeRewardAddressToUser" fra ON fra."B" = uv."A"
+        FROM _user_to_validator uv
+        JOIN _user_to_fee_reward_address fra ON fra."B" = uv."A"
         JOIN "ExecutionRewards" er ON LOWER(er.address) = LOWER(fra."A")
         WHERE er.timestamp >= NOW() - INTERVAL '24 hours'
         GROUP BY uv."B"

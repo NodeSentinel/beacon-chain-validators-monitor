@@ -2,7 +2,7 @@ import axios, { InternalAxiosRequestConfig } from 'axios';
 import { setupCache } from 'axios-cache-interceptor';
 import ms from 'ms';
 
-import { logRequest, logResponse } from '@/src/lib/httpPino.js';
+import { logError, logRequest, logResponse } from '@/src/lib/httpPino.js';
 import { limitRequests } from '@/src/services/consensus/utils/rateLimiter.js';
 
 const _instance = axios.create();
@@ -17,4 +17,4 @@ instance.interceptors.request.use(async (config: InternalAxiosRequestConfig) => 
   logRequest(config);
   return config;
 });
-instance.interceptors.response.use(logResponse);
+instance.interceptors.response.use(logResponse, logError);

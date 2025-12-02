@@ -45,8 +45,8 @@ async function updateValidatorStatusTask(logger: CustomLogger) {
       
       user_validators AS (
         SELECT DISTINCT "B" as validator_id, v.status as validator_status
-        FROM "_UserToValidator" uv
-        LEFT JOIN "Validator" v ON v.id = uv."B"
+        FROM _user_to_validator uv
+        LEFT JOIN validator v ON v.id = uv."B"
       ),
       
       -------------------------------------
@@ -55,22 +55,22 @@ async function updateValidatorStatusTask(logger: CustomLogger) {
 
       missed_attestations AS (
         SELECT 
-          c."validatorIndex",
+          c.validator_index,
           c.slot
         FROM user_validators uv
-        INNER JOIN "committee" c ON c."validatorIndex" = uv.validator_id
+        INNER JOIN committee c ON c.validator_index = uv.validator_id
         WHERE c.slot BETWEEN (SELECT min_slot FROM constants) AND (SELECT max_slot FROM constants)
-        AND (c."attestationDelay" IS NULL OR c."attestationDelay" > (SELECT max_attestation_delay FROM constants))
+        AND (c.attestation_delay IS NULL OR c.attestation_delay > (SELECT max_attestation_delay FROM constants))
         AND uv.validator_status IN (2,3) -- active_ongoing, active_exiting
       ),
       
       validator_performance AS (
         SELECT 
-          ma."validatorIndex" as validator_id,
+          ma.validator_index as validator_id,
           COUNT(*) as one_hour_missed,
           ARRAY_AGG(ma.slot ORDER BY ma.slot DESC) as missed_slots
         FROM missed_attestations ma
-        GROUP BY ma."validatorIndex"
+        GROUP BY ma.validator_index
       )
 
       -------------------------------------

@@ -616,6 +616,10 @@ describe('Epoch Processor E2E Tests', () => {
     });
   });
 
+  // TODO:
+  // validatorsBalances
+  // trackingTransitioningValidators
+
   describe('processValidatorProposerDuties', () => {
     let mockBeaconClient: Pick<BeaconClient, 'slotStartIndexing'> & {
       getValidatorProposerDuties: ReturnType<typeof vi.fn>;

@@ -389,6 +389,14 @@ export const slotProcessorMachine = setup({
                                 event.output.committeesCountInSlot,
                             }),
                           },
+                          {
+                            actions: pinoLog(
+                              ({ context }) =>
+                                `error: missing committee counts for slot ${context.slot}`,
+                              'SlotProcessor:attestations',
+                            ),
+                            target: 'error',
+                          },
                         ],
                       },
                     },
@@ -440,141 +448,248 @@ export const slotProcessorMachine = setup({
                       ),
                       type: 'final',
                     },
+                    error: {
+                      type: 'final',
+                    },
                   },
                 },
                 withdrawalRewards: {
                   description: 'Processing withdrawal rewards from beacon block',
-                  invoke: {
-                    src: 'processWithdrawalsRewardsData',
-                    input: ({ context }) => {
-                      const _beaconBlockData = context.beaconBlockData?.rawData as Block;
-                      return {
-                        slotController: context.slotController,
-                        withdrawals:
-                          _beaconBlockData?.data?.message?.body?.execution_payload?.withdrawals ||
-                          [],
-                      };
+                  initial: 'processing',
+                  states: {
+                    processing: {
+                      entry: pinoLog(
+                        ({ context }) => `processing withdrawal rewards for slot ${context.slot}`,
+                        'SlotProcessor:withdrawalRewards',
+                      ),
+                      invoke: {
+                        src: 'processWithdrawalsRewardsData',
+                        input: ({ context }) => {
+                          const _beaconBlockData = context.beaconBlockData?.rawData as Block;
+                          return {
+                            slotController: context.slotController,
+                            withdrawals:
+                              _beaconBlockData?.data?.message?.body?.execution_payload
+                                ?.withdrawals || [],
+                          };
+                        },
+                        onDone: {
+                          target: 'complete',
+                          actions: assign({
+                            beaconBlockData: ({ context, event }) => ({
+                              ...context.beaconBlockData!,
+                              withdrawalRewards: event.output || [],
+                            }),
+                          }),
+                        },
+                      },
                     },
-                    onDone: {
-                      actions: assign({
-                        beaconBlockData: ({ context, event }) => ({
-                          ...context.beaconBlockData!,
-                          withdrawalRewards: event.output || [],
-                        }),
-                      }),
+                    complete: {
+                      type: 'final',
+                      entry: pinoLog(
+                        ({ context }) => `complete withdrawal rewards for slot ${context.slot}`,
+                        'SlotProcessor:withdrawalRewards',
+                      ),
                     },
                   },
                 },
                 clDeposits: {
                   description: 'Processing CL deposits from beacon block',
-                  invoke: {
-                    src: 'processClDeposits',
-                    input: ({ context }) => {
-                      const _beaconBlockData = context.beaconBlockData?.rawData as Block;
-                      return {
-                        slotController: context.slotController,
-                        slot: context.slot,
-                        deposits: _beaconBlockData?.data?.message?.body?.deposits || [],
-                      };
+                  initial: 'processing',
+                  states: {
+                    processing: {
+                      entry: pinoLog(
+                        ({ context }) => `processing CL deposits for slot ${context.slot}`,
+                        'SlotProcessor:clDeposits',
+                      ),
+                      invoke: {
+                        src: 'processClDeposits',
+                        input: ({ context }) => {
+                          const _beaconBlockData = context.beaconBlockData?.rawData as Block;
+                          return {
+                            slotController: context.slotController,
+                            slot: context.slot,
+                            deposits: _beaconBlockData?.data?.message?.body?.deposits || [],
+                          };
+                        },
+                        onDone: {
+                          target: 'complete',
+                          actions: assign({
+                            beaconBlockData: ({ context, event }) => ({
+                              ...context.beaconBlockData!,
+                              clDeposits: event.output || [],
+                            }),
+                          }),
+                        },
+                      },
                     },
-                    onDone: {
-                      actions: assign({
-                        beaconBlockData: ({ context, event }) => ({
-                          ...context.beaconBlockData!,
-                          clDeposits: event.output || [],
-                        }),
-                      }),
+                    complete: {
+                      type: 'final',
+                      entry: pinoLog(
+                        ({ context }) => `complete CL deposits for slot ${context.slot}`,
+                        'SlotProcessor:clDeposits',
+                      ),
                     },
                   },
                 },
                 clVoluntaryExits: {
                   description: 'Processing CL voluntary exits from beacon block',
-                  invoke: {
-                    src: 'processClVoluntaryExits',
-                    input: ({ context }) => {
-                      const _beaconBlockData = context.beaconBlockData?.rawData as Block;
-                      return {
-                        slotController: context.slotController,
-                        slot: context.slot,
-                        voluntaryExits:
-                          _beaconBlockData?.data?.message?.body?.voluntary_exits || [],
-                      };
+                  initial: 'processing',
+                  states: {
+                    processing: {
+                      entry: pinoLog(
+                        ({ context }) => `processing CL voluntary exits for slot ${context.slot}`,
+                        'SlotProcessor:clVoluntaryExits',
+                      ),
+                      invoke: {
+                        src: 'processClVoluntaryExits',
+                        input: ({ context }) => {
+                          const _beaconBlockData = context.beaconBlockData?.rawData as Block;
+                          return {
+                            slotController: context.slotController,
+                            slot: context.slot,
+                            voluntaryExits:
+                              _beaconBlockData?.data?.message?.body?.voluntary_exits || [],
+                          };
+                        },
+                        onDone: {
+                          target: 'complete',
+                          actions: assign({
+                            beaconBlockData: ({ context, event }) => ({
+                              ...context.beaconBlockData!,
+                              clVoluntaryExits: event.output || [],
+                            }),
+                          }),
+                        },
+                      },
                     },
-                    onDone: {
-                      actions: assign({
-                        beaconBlockData: ({ context, event }) => ({
-                          ...context.beaconBlockData!,
-                          clVoluntaryExits: event.output || [],
-                        }),
-                      }),
+                    complete: {
+                      type: 'final',
+                      entry: pinoLog(
+                        ({ context }) => `complete CL voluntary exits for slot ${context.slot}`,
+                        'SlotProcessor:clVoluntaryExits',
+                      ),
                     },
                   },
                 },
                 elDeposits: {
                   description: 'Processing EL deposits from execution payload',
-                  invoke: {
-                    src: 'processElDeposits',
-                    input: ({ context }) => {
-                      const _beaconBlockData = context.beaconBlockData?.rawData as Block;
-                      return {
-                        slotController: context.slotController,
-                        slot: context.slot,
-                        executionPayload: _beaconBlockData?.data?.message?.body?.execution_payload,
-                      };
+                  initial: 'processing',
+                  states: {
+                    processing: {
+                      entry: pinoLog(
+                        ({ context }) => `processing EL deposits for slot ${context.slot}`,
+                        'SlotProcessor:elDeposits',
+                      ),
+                      invoke: {
+                        src: 'processElDeposits',
+                        input: ({ context }) => {
+                          const _beaconBlockData = context.beaconBlockData?.rawData as Block;
+                          return {
+                            slotController: context.slotController,
+                            slot: context.slot,
+                            executionPayload:
+                              _beaconBlockData?.data?.message?.body?.execution_payload,
+                          };
+                        },
+                        onDone: {
+                          target: 'complete',
+                          actions: assign({
+                            beaconBlockData: ({ context, event }) => ({
+                              ...context.beaconBlockData!,
+                              elDeposits: event.output || [],
+                            }),
+                          }),
+                        },
+                      },
                     },
-                    onDone: {
-                      actions: assign({
-                        beaconBlockData: ({ context, event }) => ({
-                          ...context.beaconBlockData!,
-                          elDeposits: event.output || [],
-                        }),
-                      }),
+                    complete: {
+                      type: 'final',
+                      entry: pinoLog(
+                        ({ context }) => `complete EL deposits for slot ${context.slot}`,
+                        'SlotProcessor:elDeposits',
+                      ),
                     },
                   },
                 },
                 elWithdrawals: {
                   description: 'Processing EL withdrawals from execution payload',
-                  invoke: {
-                    src: 'processElWithdrawals',
-                    input: ({ context }) => {
-                      const _beaconBlockData = context.beaconBlockData?.rawData as Block;
-                      return {
-                        slotController: context.slotController,
-                        slot: context.slot,
-                        withdrawals:
-                          _beaconBlockData?.data?.message?.body?.execution_payload?.withdrawals ||
-                          [],
-                      };
+                  initial: 'processing',
+                  states: {
+                    processing: {
+                      entry: pinoLog(
+                        ({ context }) => `processing EL withdrawals for slot ${context.slot}`,
+                        'SlotProcessor:elWithdrawals',
+                      ),
+                      invoke: {
+                        src: 'processElWithdrawals',
+                        input: ({ context }) => {
+                          const _beaconBlockData = context.beaconBlockData?.rawData as Block;
+                          return {
+                            slotController: context.slotController,
+                            slot: context.slot,
+                            withdrawals:
+                              _beaconBlockData?.data?.message?.body?.execution_payload
+                                ?.withdrawals || [],
+                          };
+                        },
+                        onDone: {
+                          target: 'complete',
+                          actions: assign({
+                            beaconBlockData: ({ context, event }) => ({
+                              ...context.beaconBlockData!,
+                              elWithdrawals: event.output || [],
+                            }),
+                          }),
+                        },
+                      },
                     },
-                    onDone: {
-                      actions: assign({
-                        beaconBlockData: ({ context, event }) => ({
-                          ...context.beaconBlockData!,
-                          elWithdrawals: event.output || [],
-                        }),
-                      }),
+                    complete: {
+                      type: 'final',
+                      entry: pinoLog(
+                        ({ context }) => `complete EL withdrawals for slot ${context.slot}`,
+                        'SlotProcessor:elWithdrawals',
+                      ),
                     },
                   },
                 },
                 elConsolidations: {
                   description: 'Processing EL consolidations from execution payload',
-                  invoke: {
-                    src: 'processElConsolidations',
-                    input: ({ context }) => {
-                      const _beaconBlockData = context.beaconBlockData?.rawData as Block;
-                      return {
-                        slotController: context.slotController,
-                        slot: context.slot,
-                        executionPayload: _beaconBlockData?.data?.message?.body?.execution_payload,
-                      };
+                  initial: 'processing',
+                  states: {
+                    processing: {
+                      entry: pinoLog(
+                        ({ context }) => `processing EL consolidations for slot ${context.slot}`,
+                        'SlotProcessor:elConsolidations',
+                      ),
+                      invoke: {
+                        src: 'processElConsolidations',
+                        input: ({ context }) => {
+                          const _beaconBlockData = context.beaconBlockData?.rawData as Block;
+                          return {
+                            slotController: context.slotController,
+                            slot: context.slot,
+                            executionPayload:
+                              _beaconBlockData?.data?.message?.body?.execution_payload,
+                          };
+                        },
+                        onDone: {
+                          target: 'complete',
+                          actions: assign({
+                            beaconBlockData: ({ context, event }) => ({
+                              ...context.beaconBlockData!,
+                              elConsolidations: event.output || [],
+                            }),
+                          }),
+                        },
+                      },
                     },
-                    onDone: {
-                      actions: assign({
-                        beaconBlockData: ({ context, event }) => ({
-                          ...context.beaconBlockData!,
-                          elConsolidations: event.output || [],
-                        }),
-                      }),
+                    complete: {
+                      type: 'final',
+                      entry: pinoLog(
+                        ({ context }) => `complete EL consolidations for slot ${context.slot}`,
+                        'SlotProcessor:elConsolidations',
+                      ),
                     },
                   },
                 },

@@ -2,6 +2,7 @@ import { createActor } from 'xstate';
 
 import { EpochController } from '@/src/services/consensus/controllers/epoch.js';
 import { SlotController } from '@/src/services/consensus/controllers/slot.js';
+import { ValidatorsController } from '@/src/services/consensus/controllers/validators.js';
 import { BeaconTime } from '@/src/services/consensus/utils/beaconTime.js';
 import { epochCreationMachine } from '@/src/xstate/epoch/epochCreator.machine.js';
 import { epochOrchestratorMachine } from '@/src/xstate/epoch/epochOrchestrator.machine.js';
@@ -32,6 +33,7 @@ export const getEpochOrchestratorActor = (
   beaconTime: BeaconTime,
   slotDuration: number,
   slotController: SlotController,
+  validatorsController: ValidatorsController,
 ) => {
   const actor = createActor(epochOrchestratorMachine, {
     input: {
@@ -40,6 +42,7 @@ export const getEpochOrchestratorActor = (
       epochController,
       beaconTime,
       slotController,
+      validatorsController,
     },
   });
 

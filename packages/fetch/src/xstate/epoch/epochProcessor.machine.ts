@@ -80,10 +80,17 @@ export const epochProcessorMachine = setup({
       }: {
         input: {
           validatorsController: ValidatorsController;
+          epochController: EpochController;
           startSlot: number;
           epoch: number;
         };
       }) => {
+        // Check if validators balances are already fetched for this epoch
+        const isFetched = await input.epochController.isValidatorsBalancesFetched(input.epoch);
+        if (isFetched) {
+          return;
+        }
+
         await input.validatorsController.fetchValidatorsBalances(input.startSlot, input.epoch);
       },
     ),
@@ -93,11 +100,20 @@ export const epochProcessorMachine = setup({
       }: {
         input: {
           validatorsController: ValidatorsController;
+          epochController: EpochController;
+          beaconTime: BeaconTime;
           markValidatorsActivationFetched: (epoch: number) => Promise<void>;
           epoch: number;
         };
       }) => {
-        await input.validatorsController.trackTransitioningValidators();
+        // Check if validators activation tracking is already done for this epoch
+        const isFetched = await input.epochController.isValidatorsActivationFetched(input.epoch);
+        if (isFetched) {
+          return;
+        }
+
+        const { startSlot } = input.beaconTime.getEpochSlots(input.epoch);
+        await input.validatorsController.trackTransitioningValidators(startSlot);
         await input.markValidatorsActivationFetched(input.epoch);
       },
     ),
@@ -386,97 +402,97 @@ export const epochProcessorMachine = setup({
               },
             },
 
-            slotsProcessing: {
-              description: 'Process slots for the epoch. Waits for committees to be ready.',
-              initial: 'waitingForCommittees',
-              states: {
-                waitingForCommittees: {
-                  entry: pinoLog(
-                    ({ context }) => `Waiting for committees for epoch ${context.epoch}`,
-                    'EpochProcessor:slotsProcessing',
-                  ),
-                  after: {
-                    0: {
-                      guard: 'areCommitteesFetched',
-                      target: 'runningSlotsOrchestrator',
-                    },
-                  },
-                  on: {
-                    COMMITTEES_FETCHED: {
-                      target: 'runningSlotsOrchestrator',
-                    },
-                  },
-                },
-                runningSlotsOrchestrator: {
-                  entry: [
-                    pinoLog(
-                      ({ context }) => `Processing slots for epoch ${context.epoch}`,
-                      'EpochProcessor:slotsProcessing',
-                    ),
-                    assign({
-                      actors: ({ context, spawn }) => {
-                        const orchestratorId = `slotOrchestrator:${context.epoch}`;
+            // slotsProcessing: {
+            //   description: 'Process slots for the epoch. Waits for committees to be ready.',
+            //   initial: 'waitingForCommittees',
+            //   states: {
+            //     waitingForCommittees: {
+            //       entry: pinoLog(
+            //         ({ context }) => `Waiting for committees for epoch ${context.epoch}`,
+            //         'EpochProcessor:slotsProcessing',
+            //       ),
+            //       after: {
+            //         0: {
+            //           guard: 'areCommitteesFetched',
+            //           target: 'runningSlotsOrchestrator',
+            //         },
+            //       },
+            //       on: {
+            //         COMMITTEES_FETCHED: {
+            //           target: 'runningSlotsOrchestrator',
+            //         },
+            //       },
+            //     },
+            //     runningSlotsOrchestrator: {
+            //       entry: [
+            //         pinoLog(
+            //           ({ context }) => `Processing slots for epoch ${context.epoch}`,
+            //           'EpochProcessor:slotsProcessing',
+            //         ),
+            //         assign({
+            //           actors: ({ context, spawn }) => {
+            //             const orchestratorId = `slotOrchestrator:${context.epoch}`;
 
-                        const actor = spawn('slotOrchestratorMachine', {
-                          id: orchestratorId,
-                          input: {
-                            epoch: context.epoch,
-                            lookbackSlot: context.config.lookbackSlot,
-                            slotController: context.services.slotController,
-                          },
-                        });
+            //             const actor = spawn('slotOrchestratorMachine', {
+            //               id: orchestratorId,
+            //               input: {
+            //                 epoch: context.epoch,
+            //                 lookbackSlot: context.config.lookbackSlot,
+            //                 slotController: context.services.slotController,
+            //               },
+            //             });
 
-                        logActor(actor, orchestratorId);
+            //             logActor(actor, orchestratorId);
 
-                        return {
-                          ...context.actors,
-                          slotOrchestratorActor: actor,
-                        };
-                      },
-                    }),
-                  ],
-                  on: {
-                    SLOTS_COMPLETED: {
-                      target: 'updatingSlotsFetched',
-                      actions: [
-                        stopChild(({ context }) => context.actors.slotOrchestratorActor?.id || ''),
-                        assign({
-                          actors: ({ context }) => ({
-                            ...context.actors,
-                            slotOrchestratorActor: null,
-                          }),
-                        }),
-                      ],
-                    },
-                  },
-                },
-                updatingSlotsFetched: {
-                  entry: pinoLog(
-                    ({ context }) => `Updating slots fetched for epoch ${context.epoch}`,
-                    'EpochProcessor:slotsProcessing',
-                  ),
-                  invoke: {
-                    src: 'updateSlotsFetched',
-                    input: ({ context }) => ({
-                      epochController: context.services.epochController,
-                      epoch: context.epoch,
-                    }),
-                    onDone: {
-                      target: 'slotsProcessed',
-                    },
-                  },
-                },
-                slotsProcessed: {
-                  type: 'final',
-                  entry: [
-                    pinoLog(
-                      ({ context }) => `Slots processed for epoch ${context.epoch}`,
-                      'EpochProcessor:slotsProcessing',
-                    ),
-                  ],
-                },
-              },
-            },
+            //             return {
+            //               ...context.actors,
+            //               slotOrchestratorActor: actor,
+            //             };
+            //           },
+            //         }),
+            //       ],
+            //       on: {
+            //         SLOTS_COMPLETED: {
+            //           target: 'updatingSlotsFetched',
+            //           actions: [
+            //             stopChild(({ context }) => context.actors.slotOrchestratorActor?.id || ''),
+            //             assign({
+            //               actors: ({ context }) => ({
+            //                 ...context.actors,
+            //                 slotOrchestratorActor: null,
+            //               }),
+            //             }),
+            //           ],
+            //         },
+            //       },
+            //     },
+            //     updatingSlotsFetched: {
+            //       entry: pinoLog(
+            //         ({ context }) => `Updating slots fetched for epoch ${context.epoch}`,
+            //         'EpochProcessor:slotsProcessing',
+            //       ),
+            //       invoke: {
+            //         src: 'updateSlotsFetched',
+            //         input: ({ context }) => ({
+            //           epochController: context.services.epochController,
+            //           epoch: context.epoch,
+            //         }),
+            //         onDone: {
+            //           target: 'slotsProcessed',
+            //         },
+            //       },
+            //     },
+            //     slotsProcessed: {
+            //       type: 'final',
+            //       entry: [
+            //         pinoLog(
+            //           ({ context }) => `Slots processed for epoch ${context.epoch}`,
+            //           'EpochProcessor:slotsProcessing',
+            //         ),
+            //       ],
+            //     },
+            //   },
+            // },
 
             trackingValidatorsActivation: {
               description: 'Track validators transitioning between states',
@@ -506,6 +522,8 @@ export const epochProcessorMachine = setup({
                         context.services.epochController.markValidatorsActivationFetched(epoch),
                       epoch: context.epoch,
                       validatorsController: context.services.validatorsController!,
+                      epochController: context.services.epochController,
+                      beaconTime: context.services.beaconTime,
                     }),
                     onDone: {
                       target: 'activationTracked',
@@ -550,6 +568,7 @@ export const epochProcessorMachine = setup({
                     src: 'fetchValidatorsBalances',
                     input: ({ context }) => ({
                       validatorsController: context.services.validatorsController!,
+                      epochController: context.services.epochController,
                       startSlot: context.startSlot,
                       epoch: context.epoch,
                     }),
