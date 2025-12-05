@@ -1,8 +1,11 @@
-import 'dotenv/config';
 import { createEnv } from '@t3-oss/env-core';
+import { config } from 'dotenv';
 import { z } from 'zod';
 
 import { getChainConfig } from '../config/chain.js';
+
+// Load .env from the indexer package root
+config({ path: new URL('../../.env', import.meta.url) });
 
 export const env = createEnv({
   clientPrefix: 'IF_NOT_PROVIDED_IT_FAILS',
@@ -15,7 +18,7 @@ export const env = createEnv({
 
     DATABASE_URL: z.string().url(),
 
-    LOG_OUTPUT: z.enum(['file', 'console']).optional(),
+    //LOG_OUTPUT: z.enum(['file', 'console']).optional(),
     LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).optional(),
 
     // Blockchain

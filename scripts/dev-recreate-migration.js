@@ -4,23 +4,14 @@
 import { spawn } from 'child_process';
 import { existsSync, rmSync } from 'fs';
 import { readdir } from 'fs/promises';
-import { join, dirname } from 'path';
+import { join } from 'path';
+import { URL } from 'url';
 
 import { config } from 'dotenv';
 
-// Load environment variables
-let envPath = '.env';
-let currentDir = process.cwd();
-
-while (!existsSync(envPath) && currentDir !== dirname(currentDir)) {
-  currentDir = dirname(currentDir);
-  envPath = join(currentDir, '.env');
-}
-
-if (existsSync(envPath)) {
-  config({ path: envPath });
-  console.log('Environment variables loaded from', envPath);
-}
+// Load environment variables from packages/db/.env
+config({ path: new URL('../packages/db/.env', import.meta.url) });
+console.log('Environment variables loaded from packages/db/.env');
 
 const {
   POSTGRES_USER,

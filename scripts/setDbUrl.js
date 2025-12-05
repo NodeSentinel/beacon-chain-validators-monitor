@@ -2,11 +2,12 @@
 
 // Script to build DATABASE_URL from PostgreSQL environment variables
 import { spawn } from 'child_process';
+import { URL } from 'url';
 
 import { config } from 'dotenv';
 
-// Load environment variables
-config();
+// Load environment variables from packages/db/.env
+config({ path: new URL('../packages/db/.env', import.meta.url) });
 
 const {
   POSTGRES_USER,

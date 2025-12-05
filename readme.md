@@ -40,13 +40,9 @@ The code is written in TypeScript and uses XState to orchestrate the data fetchi
    ```
 
 3. **Environment setup**
-   - Create root `.env` for Docker infrastructure (PostgreSQL variables). Example:
-     ```bash
-     cp .env.example .env
-     # Edit .env with your local PostgreSQL credentials
-     ```
-   - Create per-package env files for runtime:
-     - `packages/indexer/.env` (service runtime)
+   - Create per-package env files:
+     - `packages/db/.env` (PostgreSQL connection for Prisma)
+     - `packages/indexer/.env` (indexer service runtime)
      - `packages/telegram-bot/.env` (bot runtime)
      - `packages/telegram-mini-app/.env.local` (Next.js dev)
    - See "Environment variables" below for full templates.
@@ -58,8 +54,8 @@ The code is written in TypeScript and uses XState to orchestrate the data fetchi
 
 ### Development only
 
-- `cp .env.example .env`
 - pnpm install
+- Create `.env` files in each package (see Environment variables section)
 - docker compose up postgres
 - pnpm db:generate
 - pnpm db:dev:reset
@@ -68,9 +64,9 @@ The code is written in TypeScript and uses XState to orchestrate the data fetchi
 
 ## Environment variables
 
-### Root (.env)
+### packages/db/.env
 
-Used by `docker-compose.yml` and scripts to construct `DATABASE_URL`. Do not put app secrets here.
+Used by Prisma scripts to construct `DATABASE_URL`. This file contains only PostgreSQL connection parameters.
 
 ```bash
 # PostgreSQL Infrastructure
@@ -80,7 +76,7 @@ POSTGRES_DB=beacon_indexer
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 
-# Docker flag
+# Docker flag (set to true when running in Docker)
 DOCKER_ENV=false
 ```
 
