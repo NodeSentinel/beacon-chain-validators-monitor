@@ -138,7 +138,7 @@ model Committee {
     attestationDelay     Int? @map("attestation_delay") @db.SmallInt
 
     @@id([slot, index, aggregationBitsIndex]) // used to update attestation delays
-    @@index([slot, validatorIndex, attestationDelay]) // used to query attestations delays for a validator
+    @@index([validatorIndex, slot(sort: Desc), attestationDelay]) // used to query attestations delays for a validator
     @@map("committee")
 }
 
