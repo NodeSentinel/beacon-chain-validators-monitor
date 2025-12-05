@@ -9,7 +9,7 @@ RUN npm install -g pnpm@9.2.0
 WORKDIR /app
 
 # Copy package management files first (for caching)
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 
 # Copy only package.json and tsconfig for each package (minimal files needed for install)
 COPY packages/db/package.json ./packages/db/package.json
@@ -30,7 +30,7 @@ COPY packages/fetch ./packages/fetch
 COPY scripts/setDbUrl.js ./scripts/setDbUrl.js
 
 # Generate Prisma client from db package
-RUN pnpx prisma generate --schema=./packages/db/prisma/schema.prisma
+RUN pnpm exec prisma generate --schema=./packages/db/prisma/schema.prisma
 
 # Build the db package first
 RUN pnpm --filter @beacon-indexer/db run build

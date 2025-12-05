@@ -20,9 +20,6 @@ export class SlotStorage {
       where: {
         slot: slot,
       },
-      include: {
-        slotProcessedData: true,
-      },
     });
   }
 
@@ -73,6 +70,18 @@ export class SlotStorage {
     });
 
     return res?.attestationsFetched === true;
+  }
+
+  /**
+   * Check if execution rewards have been fetched for a slot
+   */
+  async areExecutionRewardsFetched(slot: number) {
+    const res = await this.prisma.slot.findFirst({
+      where: { slot },
+      select: { executionRewardsFetched: true },
+    });
+
+    return res?.executionRewardsFetched === true;
   }
 
   /**
@@ -149,21 +158,41 @@ export class SlotStorage {
   }
 
   /**
-   * Check if slot has all required processing completed
+   * Get the slot processing status for an epoch range.
+   * Returns the next unprocessed slot (if any) and whether all slots are processed.
    */
-  async isSlotFullyProcessed(slot: number) {
-    const processingData = await this.prisma.slot.findUnique({
+  async getEpochSlotsStatus(startSlot: number, endSlot: number) {
+    // Single query to get all slots in the range
+    const slots = await this.prisma.slot.findMany({
       where: {
-        slot: slot,
-        consensusRewardsFetched: true,
-        executionRewardsFetched: true,
-        attestationsFetched: true,
-        syncRewardsFetched: true,
-        validatorWithdrawalsFetched: true,
-        executionRequestsFetched: true,
+        slot: {
+          gte: startSlot,
+          lte: endSlot,
+        },
+      },
+      select: {
+        slot: true,
+        processed: true,
+      },
+      orderBy: {
+        slot: 'asc',
       },
     });
-    return processingData !== null;
+
+    const expectedSlotCount = endSlot - startSlot + 1;
+    const totalSlots = slots.length;
+    const processedSlots = slots.filter((s) => s.processed).length;
+
+    // Find first unprocessed slot
+    const firstUnprocessed = slots.find((s) => !s.processed);
+
+    return {
+      nextSlotToProcess: firstUnprocessed?.slot ?? null,
+      // All slots are processed only if:
+      // 1. We have all the expected slots in the DB
+      // 2. All of them are marked as processed
+      allSlotsProcessed: totalSlots === expectedSlotCount && processedSlots === expectedSlotCount,
+    };
   }
 
   /**
@@ -235,28 +264,26 @@ export class SlotStorage {
   }
 
   /**
-   * Update slot processing data
-   */
-  async updateSlotProcessedData(slot: number, data: Prisma.SlotProcessedDataUpdateInput) {
-    return this.prisma.slotProcessedData.update({
-      where: { slot },
-      data,
-    });
-  }
-
-  /**
    * Generic update for slot flags
    */
   async updateSlotFlags(
     slot: number,
-    data: Pick<
-      Prisma.SlotUpdateInput,
-      | 'attestationsFetched'
-      | 'consensusRewardsFetched'
-      | 'executionRewardsFetched'
-      | 'validatorWithdrawalsFetched'
-      | 'syncRewardsFetched'
-      | 'executionRequestsFetched'
+    data: Partial<
+      Pick<
+        Prisma.SlotUpdateInput,
+        | 'attestationsFetched'
+        | 'consensusRewardsFetched'
+        | 'executionRewardsFetched'
+        | 'epWithdrawalsFetched'
+        | 'syncRewardsFetched'
+        | 'depositsFetched'
+        | 'voluntaryExitsFetched'
+        | 'erDepositsFetched'
+        | 'erWithdrawalsFetched'
+        | 'erConsolidationsFetched'
+        | 'proposerSlashingsFetched'
+        | 'attesterSlashingsFetched'
+      >
     >,
   ) {
     return this.prisma.slot.update({
@@ -299,34 +326,6 @@ export class SlotStorage {
       },
       data: {
         executionRewardsFetched: true,
-      },
-    });
-  }
-
-  /**
-   * Update slot with beacon data (withdrawals, deposits, etc.)
-   */
-  async updateSlotWithBeaconData(
-    slot: number,
-    data: Pick<
-      Prisma.SlotProcessedDataUpdateInput,
-      | 'withdrawalsRewards'
-      | 'clDeposits'
-      | 'clVoluntaryExits'
-      | 'elDeposits'
-      | 'elWithdrawals'
-      | 'elConsolidations'
-    >,
-  ) {
-    return this.prisma.slotProcessedData.update({
-      where: { slot },
-      data: {
-        withdrawalsRewards: data.withdrawalsRewards || [],
-        clDeposits: data.clDeposits || [],
-        clVoluntaryExits: data.clVoluntaryExits || [],
-        elDeposits: data.elDeposits || [],
-        elWithdrawals: data.elWithdrawals || [],
-        elConsolidations: data.elConsolidations || [],
       },
     });
   }
@@ -390,6 +389,26 @@ export class SlotStorage {
   async saveExecutionRewards(data: Prisma.ExecutionRewardsUncheckedCreateInput) {
     return this.prisma.executionRewards.create({
       data,
+    });
+  }
+
+  /**
+   * Save execution rewards and update slot flag in a transaction
+   * TODO: move this to execution controller/storage.
+   */
+  async saveExecutionRewardsAndUpdateSlot(
+    slot: number,
+    data: Prisma.ExecutionRewardsUncheckedCreateInput,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.executionRewards.create({
+        data,
+      });
+
+      await tx.slot.update({
+        where: { slot },
+        data: { executionRewardsFetched: true },
+      });
     });
   }
 
@@ -469,6 +488,102 @@ export class SlotStorage {
   }
 
   /**
+   * Save block rewards and update slot flag in a transaction
+   */
+  async saveBlockRewardsAndUpdateSlot(
+    slot: number,
+    reward: {
+      validatorIndex: number;
+      date: Date;
+      hour: number;
+      blockReward: bigint;
+    } | null,
+  ) {
+    await this.prisma.$transaction(
+      async (tx) => {
+        if (reward) {
+          await tx.hourlyBlockAndSyncRewards.upsert({
+            where: {
+              validatorIndex_date_hour: {
+                validatorIndex: reward.validatorIndex,
+                date: reward.date,
+                hour: reward.hour,
+              },
+            },
+            create: {
+              validatorIndex: reward.validatorIndex,
+              date: reward.date,
+              hour: reward.hour,
+              blockReward: reward.blockReward,
+              syncCommittee: 0n,
+            },
+            update: {
+              blockReward: {
+                increment: reward.blockReward,
+              },
+            },
+          });
+        }
+
+        await tx.slot.upsert({
+          where: { slot },
+          update: { consensusRewardsFetched: true },
+          create: { slot, consensusRewardsFetched: true },
+        });
+      },
+      { timeout: ms('5m') },
+    );
+  }
+
+  /**
+   * Save sync committee rewards and update slot flag in a transaction
+   */
+  async saveSyncRewardsAndUpdateSlot(
+    slot: number,
+    rewards: Array<{
+      validatorIndex: number;
+      date: Date;
+      hour: number;
+      syncCommittee: bigint;
+    }>,
+  ) {
+    await this.prisma.$transaction(
+      async (tx) => {
+        for (const reward of rewards) {
+          await tx.hourlyBlockAndSyncRewards.upsert({
+            where: {
+              validatorIndex_date_hour: {
+                validatorIndex: reward.validatorIndex,
+                date: reward.date,
+                hour: reward.hour,
+              },
+            },
+            create: {
+              validatorIndex: reward.validatorIndex,
+              date: reward.date,
+              hour: reward.hour,
+              syncCommittee: reward.syncCommittee,
+              blockReward: 0n,
+            },
+            update: {
+              syncCommittee: {
+                increment: reward.syncCommittee,
+              },
+            },
+          });
+        }
+
+        await tx.slot.upsert({
+          where: { slot },
+          update: { syncRewardsFetched: true },
+          create: { slot, syncRewardsFetched: true },
+        });
+      },
+      { timeout: ms('5m') },
+    );
+  }
+
+  /**
    * Save validator withdrawals to database
    */
   async saveValidatorWithdrawals(
@@ -481,7 +596,91 @@ export class SlotStorage {
       });
       await tx.slot.update({
         where: { slot },
-        data: { validatorWithdrawalsFetched: true },
+        data: { epWithdrawalsFetched: true },
+      });
+    });
+  }
+
+  /**
+   * Save validator deposits from execution requests to database
+   */
+  async saveValidatorDeposits(
+    slot: number,
+    deposits: Prisma.validatorDepositsUncheckedCreateInput[],
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.validatorDeposits.createMany({
+        data: deposits,
+      });
+      await tx.slot.update({
+        where: { slot },
+        data: { erDepositsFetched: true },
+      });
+    });
+  }
+
+  /**
+   * Save validator deposits from beacon block body to database
+   */
+  async saveBodyDeposits(slot: number, deposits: Prisma.validatorDepositsUncheckedCreateInput[]) {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.validatorDeposits.createMany({
+        data: deposits,
+      });
+      await tx.slot.update({
+        where: { slot },
+        data: { depositsFetched: true },
+      });
+    });
+  }
+
+  /**
+   * Save validator exits to database
+   */
+  async saveValidatorExits(slot: number, exits: Prisma.validatorExitsUncheckedCreateInput[]) {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.validatorExits.createMany({
+        data: exits,
+      });
+      await tx.slot.update({
+        where: { slot },
+        data: { voluntaryExitsFetched: true },
+      });
+    });
+  }
+
+  /**
+   * Save validator withdrawal requests to database
+   */
+  async saveValidatorWithdrawalsRequests(
+    slot: number,
+    withdrawals: Prisma.validatorWithdrawalsRequestsUncheckedCreateInput[],
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.validatorWithdrawalsRequests.createMany({
+        data: withdrawals,
+      });
+      await tx.slot.update({
+        where: { slot },
+        data: { erWithdrawalsFetched: true },
+      });
+    });
+  }
+
+  /**
+   * Save validator consolidation requests to database
+   */
+  async saveValidatorConsolidationsRequests(
+    slot: number,
+    consolidations: Prisma.validatorConsolidationsRequestsUncheckedCreateInput[],
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.validatorConsolidationsRequests.createMany({
+        data: consolidations,
+      });
+      await tx.slot.update({
+        where: { slot },
+        data: { erConsolidationsFetched: true },
       });
     });
   }
@@ -495,18 +694,28 @@ export class SlotStorage {
     },
   ) {
     await this.prisma.$transaction(async (tx) => {
-      await tx.validatorDeposits.createMany({
-        data: data.validatorDeposits,
-      });
-      await tx.validatorWithdrawalsRequests.createMany({
-        data: data.validatorWithdrawalsRequests,
-      });
-      await tx.validatorConsolidationsRequests.createMany({
-        data: data.validatorConsolidationsRequests,
-      });
+      if (data.validatorDeposits.length > 0) {
+        await tx.validatorDeposits.createMany({
+          data: data.validatorDeposits,
+        });
+      }
+      if (data.validatorWithdrawalsRequests.length > 0) {
+        await tx.validatorWithdrawalsRequests.createMany({
+          data: data.validatorWithdrawalsRequests,
+        });
+      }
+      if (data.validatorConsolidationsRequests.length > 0) {
+        await tx.validatorConsolidationsRequests.createMany({
+          data: data.validatorConsolidationsRequests,
+        });
+      }
       await tx.slot.update({
         where: { slot: slotNumber },
-        data: { executionRequestsFetched: true },
+        data: {
+          erDepositsFetched: data.validatorDeposits.length > 0,
+          erWithdrawalsFetched: data.validatorWithdrawalsRequests.length > 0,
+          erConsolidationsFetched: data.validatorConsolidationsRequests.length > 0,
+        },
       });
     });
   }
@@ -633,54 +842,47 @@ export class SlotStorage {
   ): Promise<void> {
     await this.prisma.$transaction(
       async (tx) => {
-        // Save sync committee rewards to syncCommitteeRewards table
-        // Process rewards in batches to avoid memory issues
-        const batchSize = 50_000;
+        // Bulk insert into sync_committee_rewards table using VALUES in batches
+        // PostgreSQL limit: 32,767 bind variables per prepared statement
+        // With 3 columns per row, max batch size = 32,767 / 3 ≈ 10,900 rows
+        // Using 10,000 rows per batch for better performance (using executeRawUnsafe)
+        const batchSize = 10_000;
         const batches = chunk(processedRewards, batchSize);
         for (const batch of batches) {
-          for (const processedReward of batch) {
-            await tx.syncCommitteeRewards.upsert({
-              where: {
-                slot_validatorIndex: {
-                  slot,
-                  validatorIndex: processedReward.validatorIndex,
-                },
-              },
-              create: {
-                slot,
-                validatorIndex: processedReward.validatorIndex,
-                syncCommitteeReward: processedReward.syncCommitteeReward,
-              },
-              update: {
-                syncCommitteeReward: processedReward.syncCommitteeReward,
-              },
-            });
-          }
+          const valuesClause = batch
+            .map((r) => `(${slot}, ${r.validatorIndex}, ${r.syncCommitteeReward.toString()})`)
+            .join(',');
+
+          await tx.$executeRawUnsafe(`
+            INSERT INTO sync_committee_rewards 
+              (slot, validator_index, sync_committee_reward)
+            VALUES ${valuesClause}
+          `);
         }
 
         // Aggregate rewards into HourlyValidatorStats using pre-calculated values
         // Process in batches to avoid SQL parameter limits
-        const statsBatchSize = 5_000;
-        const statsBatches = chunk(processedRewards, statsBatchSize);
+        // const statsBatchSize = 5_000;
+        // const statsBatches = chunk(processedRewards, statsBatchSize);
 
-        for (const statsBatch of statsBatches) {
-          const valuesClause = statsBatch
-            .map((r) => `(${r.validatorIndex}, ${r.syncCommitteeReward.toString()}, 0)`)
-            .join(',');
+        // for (const statsBatch of statsBatches) {
+        //   const valuesClause = statsBatch
+        //     .map((r) => `(${r.validatorIndex}, ${r.syncCommitteeReward.toString()}, 0)`)
+        //     .join(',');
 
-          await tx.$executeRawUnsafe(`
-            INSERT INTO hourly_validator_stats 
-              (datetime, validator_index, cl_rewards, cl_missed_rewards)
-            SELECT 
-              '${datetime.toISOString()}'::timestamp as datetime,
-              validator_index,
-              cl_rewards,
-              cl_missed_rewards
-            FROM (VALUES ${valuesClause}) AS rewards(validator_index, cl_rewards, cl_missed_rewards)
-            ON CONFLICT (datetime, validator_index) DO UPDATE SET
-              cl_rewards = hourly_validator_stats.cl_rewards + EXCLUDED.cl_rewards
-          `);
-        }
+        //   await tx.$executeRawUnsafe(`
+        //     INSERT INTO hourly_validator_stats
+        //       (datetime, validator_index, cl_rewards, cl_missed_rewards)
+        //     SELECT
+        //       '${datetime.toISOString()}'::timestamp as datetime,
+        //       validator_index,
+        //       cl_rewards,
+        //       cl_missed_rewards
+        //     FROM (VALUES ${valuesClause}) AS rewards(validator_index, cl_rewards, cl_missed_rewards)
+        //     ON CONFLICT (datetime, validator_index) DO UPDATE SET
+        //       cl_rewards = hourly_validator_stats.cl_rewards + EXCLUDED.cl_rewards
+        //   `);
+        // }
 
         // mark slot as processed
         await tx.slot.upsert({
@@ -693,7 +895,7 @@ export class SlotStorage {
         });
       },
       {
-        timeout: ms('10s'),
+        timeout: ms('1m'),
       },
     );
   }

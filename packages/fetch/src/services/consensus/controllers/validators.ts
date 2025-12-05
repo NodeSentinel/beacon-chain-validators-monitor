@@ -151,7 +151,7 @@ export class ValidatorsController {
   /**
    * Track transitioning validators (pending -> active/exited, etc.).
    */
-  async trackTransitioningValidators() {
+  async trackTransitioningValidators(slotId: number) {
     const pendingValidators = await this.validatorsStorage.getPendingValidators();
 
     if (pendingValidators.length === 0) {
@@ -159,7 +159,7 @@ export class ValidatorsController {
     }
 
     const validatorIds = pendingValidators.map((v) => String(v.id));
-    const validatorsData = await this.beaconClient.getValidators('head', validatorIds, null);
+    const validatorsData = await this.beaconClient.getValidators(slotId, validatorIds, null);
 
     await this.validatorsStorage.updateValidators(validatorsData);
 

@@ -34,12 +34,28 @@ model validatorWithdrawals {
 }
 
 model validatorDeposits {
-    slot   Int    @map("slot")
-    pubkey String @map("pubkey") @db.VarChar(98)
-    amount BigInt @map("amount")
+    slot                  Int    @map("slot")
+    pubkey                String @map("pubkey") @db.VarChar(98)
+    withdrawalCredentials String @map("withdrawal_credentials") @db.VarChar(66)
+    amount                BigInt @map("amount")
+    index                 Int?   @map("index")
 
     @@id([slot, pubkey])
     @@map("validator_deposits")
+}
+
+enum ValidatorExitEvent {
+    voluntary
+    slashed
+}
+
+model validatorExits {
+    index Int                @id @map("index")
+    epoch Int                @map("epoch")
+    slot  Int                @map("slot")
+    event ValidatorExitEvent @map("event")
+
+    @@map("validator_voluntary_exits")
 }
 
 model validatorWithdrawalsRequests {
@@ -76,43 +92,40 @@ model Epoch {
 }
 
 model Slot {
-    slot                        Int     @id @map("slot")
-    proposerIndex               Int?    @map("proposer_index")
-    blockNumber                 Int?    @map("block_number")
-    consensusReward             BigInt? @map("consensus_reward")
-    executionReward             BigInt? @map("execution_reward")
+    slot                     Int     @id @map("slot")
+    proposerIndex            Int?    @map("proposer_index")
+    blockNumber              Int?    @map("block_number")
+    consensusReward          BigInt? @map("consensus_reward")
+    executionReward          BigInt? @map("execution_reward")
     // Stores the number of validators per committee index as an array: [350, 340, ...], required for attestation processing
-    committeesCountInSlot       Json?   @map("committees_count_in_slot")
+    committeesCountInSlot    Json?   @map("committees_count_in_slot")
     // processed data flags
-    processed                   Boolean @default(false) @map("processed")
-    attestationsFetched         Boolean @default(false) @map("attestations_fetched")
-    consensusRewardsFetched     Boolean @default(false) @map("consensus_rewards_fetched")
-    executionRewardsFetched     Boolean @default(false) @map("execution_rewards_fetched")
-    validatorWithdrawalsFetched Boolean @default(false) @map("validator_withdrawals_fetched")
-    syncRewardsFetched          Boolean @default(false) @map("sync_rewards_fetched")
-    executionRequestsFetched    Boolean @default(false) @map("execution_requests_fetched")
+    attestationsFetched      Boolean @default(false) @map("attestations_fetched")
+    syncRewardsFetched       Boolean @default(false) @map("sync_rewards_fetched")
+    consensusRewardsFetched  Boolean @default(false) @map("consensus_rewards_fetched")
+    executionRewardsFetched  Boolean @default(false) @map("execution_rewards_fetched")
+    // block data
+    // data.message.body.proposer_slashings
+    proposerSlashingsFetched Boolean @default(false) @map("proposer_slashings_fetched")
+    // data.message.body.attester_slashings
+    attesterSlashingsFetched Boolean @default(false) @map("attester_slashings_fetched")
+    // data.message.body.deposits
+    depositsFetched          Boolean @default(false) @map("deposits_fetched")
+    // data.message.body.voluntary_exits
+    voluntaryExitsFetched    Boolean @default(false) @map("voluntary_exits_fetched")
+    // data.message.body.execution_payload.withdrawals
+    epWithdrawalsFetched     Boolean @default(false) @map("ep_withdrawals_fetched")
+    // data.message.body.execution_requests.deposits
+    erDepositsFetched        Boolean @default(false) @map("er_deposits_fetched")
+    // data.message.body.execution_requests.withdrawals
+    erWithdrawalsFetched     Boolean @default(false) @map("er_withdrawals_fetched")
+    // data.message.body.execution_requests.consolidations
+    erConsolidationsFetched  Boolean @default(false) @map("er_consolidations_fetched")
 
-    slotProcessedData SlotProcessedData[]
+    processed Boolean @default(false) @map("processed")
 
     @@index([slot, processed])
     @@map("slot")
-}
-
-model SlotProcessedData {
-    slot               Int   @id @map("slot")
-    // TODO: all of this should be tables I think. 
-    withdrawalsRewards Json? @map("withdrawals_rewards") // { validator_index: amount }
-    clDeposits         Json? @map("cl_deposits")
-    clVoluntaryExits   Json? @map("cl_voluntary_exits")
-    elDeposits         Json? @map("el_deposits")
-    elWithdrawals      Json? @map("el_withdrawals")
-    elConsolidations   Json? @map("el_consolidations")
-    proposerSlashings  Json? @map("proposer_slashings")
-    attesterSlashings  Json? @map("attester_slashings")
-
-    slotRelation Slot @relation(fields: [slot], references: [slot])
-
-    @@map("slot_processed_data")
 }
 
 // Committee is a list of validators that were assigned to a slot.
@@ -298,16 +311,16 @@ model ExecutionRewards {
 
 /// Global daily validator stats (counts + averages in gwei)
 model BeaconDailyValidatorStats {
-  date             DateTime @id @db.Date
+    date DateTime @id @db.Date
 
-  // counts
-  pendingQueued    Int      @default(0) @map("pending_queued")
-  activeOngoing    Int      @default(0) @map("active_ongoing")
-  activeExiting    Int      @default(0) @map("active_exiting")
+    // counts
+    pendingQueued Int @default(0) @map("pending_queued")
+    activeOngoing Int @default(0) @map("active_ongoing")
+    activeExiting Int @default(0) @map("active_exiting")
 
-  // averages (store floored bigint in gwei)
-  balance          BigInt?  @map("avg_balance")
-  effectiveBalance BigInt?  @map("avg_effective_balance")
+    // averages (store floored bigint in gwei)
+    balance          BigInt? @map("avg_balance")
+    effectiveBalance BigInt? @map("avg_effective_balance")
 
-  @@map("beacon_daily_validator_stats")
+    @@map("beacon_daily_validator_stats")
 }

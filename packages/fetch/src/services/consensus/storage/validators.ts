@@ -128,7 +128,7 @@ export class ValidatorsStorage {
         async (tx) => {
           // Create temporary table
           await tx.$executeRaw`
-          CREATE TEMPORARY TABLE "TempValidator" (LIKE "Validator") ON COMMIT DROP
+          CREATE TEMPORARY TABLE "TempValidator" (LIKE validator) ON COMMIT DROP
         `;
 
           const batches = chunk(validatorBalances, 12_000);
@@ -150,11 +150,11 @@ export class ValidatorsStorage {
 
           // Merge data from temporary table to main table
           await tx.$executeRaw`
-            INSERT INTO "Validator" (id, balance)
+            INSERT INTO validator (id, balance)
             SELECT id, balance
             FROM "TempValidator"
             ON CONFLICT (id) DO UPDATE SET
-              "balance" = EXCLUDED.balance
+              balance = EXCLUDED.balance
           `;
 
           // Update the epoch to mark balances as fetched

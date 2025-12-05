@@ -4,6 +4,34 @@ import pLimit from 'p-limit';
 import pRetry from 'p-retry';
 
 /**
+ * Extract endpoint path from a full URL or AxiosError
+ * Returns just the path and query string, without the base URL
+ */
+function extractEndpointPath(url: string | undefined): string {
+  if (!url) return 'unknown';
+  try {
+    const urlObj = new URL(url);
+    return urlObj.pathname + urlObj.search;
+  } catch {
+    // If URL parsing fails, try to extract path manually
+    const match = url.match(/https?:\/\/[^/]+(\/.*)/);
+    return match ? match[1] : url;
+  }
+}
+
+/**
+ * Extract endpoint from an AxiosError
+ */
+function extractEndpointFromError(error: unknown): string {
+  if (error instanceof AxiosError) {
+    return extractEndpointPath(
+      error.config?.url || error.request?.url || error.response?.config?.url,
+    );
+  }
+  return 'unknown';
+}
+
+/**
  * Base class that provides reliable request functionality with concurrency control,
  * exponential backoff, and fallback strategies
  */
@@ -64,33 +92,49 @@ export abstract class ReliableRequestClient {
     nodeType: 'full' | 'archive',
     errorHandler?: (error: AxiosError<{ message: string }>) => T | undefined,
   ): Promise<T> {
-    try {
-      // Select the appropriate limit based on node type
-      const limit = nodeType === 'full' ? this.fullNodeLimit : this.archiveNodeLimit;
-      return await limit(() =>
-        pRetry(() => callEndpoint(url), {
+    // Select the appropriate limit based on node type
+    const limit = nodeType === 'full' ? this.fullNodeLimit : this.archiveNodeLimit;
+
+    return await limit(() =>
+      pRetry(
+        async () => {
+          try {
+            return await callEndpoint(url);
+          } catch (error) {
+            // If errorHandler is provided, try to handle the error before retrying
+            // If the handler can handle it (returns a value), return it immediately
+            // This prevents unnecessary retries for errors like 404
+            if (errorHandler && error instanceof AxiosError) {
+              const handled = errorHandler(error);
+              if (handled !== undefined) {
+                // Return the handled value directly - p-retry won't retry on success
+                return handled;
+              }
+            }
+            // If errorHandler didn't handle it or doesn't exist, re-throw to continue retries
+            throw error;
+          }
+        },
+        {
           retries,
           minTimeout: ms('1s'),
-          onFailedAttempt: async (error: { attemptNumber: number; message: string }) => {
+          onFailedAttempt: async (error: unknown) => {
+            // p-retry adds attemptNumber property to the error object
+            const attemptNumber = (error as { attemptNumber?: number }).attemptNumber || 0;
+            // Extract endpoint from the error (if it's an AxiosError)
+            const endpoint = extractEndpointFromError(error);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const statusCode = error instanceof AxiosError ? error.response?.status : undefined;
+
             console.log(
-              `Failed attempt ${error.attemptNumber} for ${url}. Error: ${error.message}`,
+              `Failed attempt ${attemptNumber} for ${endpoint}. Error: ${errorMessage}${statusCode ? ` (${statusCode})` : ''}`,
             );
-            const delay = this.calculateBackoffDelay(error.attemptNumber);
+            const delay = this.calculateBackoffDelay(attemptNumber);
             await new Promise((resolve) => setTimeout(resolve, delay));
           },
-        }),
-      );
-    } catch (error) {
-      // Try to handle the error if handler provided
-      if (errorHandler) {
-        const handled = errorHandler(error as AxiosError<{ message: string }>);
-        if (handled !== undefined) {
-          return handled;
-        }
-      }
-
-      throw error;
-    }
+        },
+      ),
+    );
   }
 
   /**

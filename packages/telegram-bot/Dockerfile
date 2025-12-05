@@ -9,7 +9,7 @@ RUN npm install -g pnpm@9.2.0
 WORKDIR /app
 
 # Copy package management files first
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 
 # Copy telegram-bot package files
 COPY packages/telegram-bot/package.json ./packages/telegram-bot/package.json

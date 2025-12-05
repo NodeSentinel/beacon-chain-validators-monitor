@@ -19,6 +19,45 @@ import { ValidatorsStorage } from '@/src/services/consensus/storage/validators.j
 import { GetCommittees } from '@/src/services/consensus/types.js';
 import { BeaconTime } from '@/src/services/consensus/utils/beaconTime.js';
 
+// TODO: Missing tests for epochProcessor.machine states:
+// Machine-level states:
+// - checkingCanProcess: test guard 'canProcessEpoch' (when epoch can/cannot be processed)
+// - waitingToProcessEpoch: test waitToProcessEpoch actor and transition back to checkingCanProcess
+// - markingEpochProcessed: test markEpochAsProcessed actor and EPOCH_COMPLETED event sent to parent
+// - epochCompleted: test final state reached after marking epoch as processed
+//
+// monitoringEpochStart parallel state:
+// - checkingIfEpochAlreadyStarted: test guard 'hasEpochAlreadyStarted' (when epoch already started vs not started)
+// - waitingForEpochStart: test waitForEpochStart actor invocation
+// - epochStarted: test EPOCH_STARTED event is raised
+//
+// fetching.validatorsBalances parallel state:
+// - validatorsBalances.waitingForEpochStart: test waiting for EPOCH_STARTED event
+// - validatorsBalances.fetchingValidatorsBalances: test fetchValidatorsBalances actor (already fetched vs not fetched)
+// - validatorsBalances.validatorsBalancesFetched: test VALIDATORS_BALANCES_FETCHED event is raised and sync state updated
+//
+// fetching.trackingValidatorsActivation parallel state:
+// - trackingValidatorsActivation.waitingForEpochStart: test waiting for EPOCH_STARTED event
+// - trackingValidatorsActivation.trackingActivation: test trackingTransitioningValidators actor (already fetched vs not fetched)
+// - trackingValidatorsActivation.activationTracked: test final state reached
+//
+// fetching.rewards parallel state:
+// - rewards.waitingForBalances: test guard 'areValidatorsBalancesFetched' and VALIDATORS_BALANCES_FETCHED event handling
+// - rewards.waitingForEpochEnd: test waitForEpochEnd actor invocation
+// - rewards.fetchingRewards: test fetchAttestationsRewards actor (fetchRewards method)
+// - rewards.rewardsFetched: test final state reached
+//
+// Guards to test:
+// - canProcessEpoch: test epoch <= currentEpoch + 1
+// - hasEpochAlreadyStarted: test hasSlotStarted check
+// - areValidatorsBalancesFetched: test sync.validatorsBalancesFetched flag
+// - canFetchRewards: test validatorsBalancesFetched && hasEpochEnded
+//
+// Integration flows to test:
+// - Full machine flow from checkingCanProcess to epochCompleted
+// - Parallel state coordination (monitoringEpochStart + fetching states)
+// - Event-driven transitions (EPOCH_STARTED triggering validatorsBalances and trackingValidatorsActivation)
+
 /**
  * Note: Mocked data from this tests was taken from Gnosis chain.
  */
@@ -131,6 +170,7 @@ describe('Epoch Processor E2E Tests', () => {
     beforeEach(async () => {
       // Clean up database
       await prisma.hourlyValidatorStats.deleteMany();
+      await prisma.epochRewards.deleteMany();
       await prisma.validator.deleteMany();
       await prisma.epoch.deleteMany();
 
@@ -230,25 +270,27 @@ describe('Epoch Processor E2E Tests', () => {
       // Verify that epoch 1525791 rewards exist for validator 549419
       expect(epoch1525791Reward549419).toBeDefined();
 
-      expect(dbHourlyStats.length).toBeGreaterThan(0);
+      // NOTE: hourly_validator_stats aggregation is currently disabled (code commented out)
+      // The following assertions are commented out until aggregation is re-enabled
+      // expect(dbHourlyStats.length).toBeGreaterThan(0);
 
-      // Verify validator 549417 stats
-      const stats549417 = dbHourlyStats.find((s) => s.validatorIndex === 549417);
-      expect(stats549417!.datetime.toISOString()).toBe(expectedDatetime.toISOString());
-      // Verify validator 549417 rewards (87524+163524+87929+0) + (87314+163553+87978+0) = 338977 + 338845 = 677822
-      expect(Number(stats549417!.clRewards?.toString())).toBe(677822);
+      // // Verify validator 549417 stats
+      // const stats549417 = dbHourlyStats.find((s) => s.validatorIndex === 549417);
+      // expect(stats549417!.datetime.toISOString()).toBe(expectedDatetime.toISOString());
+      // // Verify validator 549417 rewards (87524+163524+87929+0) + (87314+163553+87978+0) = 338977 + 338845 = 677822
+      // expect(Number(stats549417!.clRewards?.toString())).toBe(677822);
 
-      // Verify validator 549418 stats
-      const stats549418 = dbHourlyStats.find((s) => s.validatorIndex === 549418);
-      expect(stats549418!.datetime.toISOString()).toBe(expectedDatetime.toISOString());
-      // Verify validator 549418 rewards (same as 549417)
-      expect(Number(stats549418!.clRewards?.toString())).toBe(677822);
+      // // Verify validator 549418 stats
+      // const stats549418 = dbHourlyStats.find((s) => s.validatorIndex === 549418);
+      // expect(stats549418!.datetime.toISOString()).toBe(expectedDatetime.toISOString());
+      // // Verify validator 549418 rewards (same as 549417)
+      // expect(Number(stats549418!.clRewards?.toString())).toBe(677822);
 
-      // Verify validator 549419 stats
-      const stats549419 = dbHourlyStats.find((s) => s.validatorIndex === 549419);
-      expect(stats549419!.datetime.toISOString()).toBe(expectedDatetime.toISOString());
-      // Verify validator 549419 rewards (37711+70458+37886+0) + (37621+70470+37907+0) = 146055 + 145998 = 292053
-      expect(Number(stats549419!.clRewards?.toString())).toBe(292053);
+      // // Verify validator 549419 stats
+      // const stats549419 = dbHourlyStats.find((s) => s.validatorIndex === 549419);
+      // expect(stats549419!.datetime.toISOString()).toBe(expectedDatetime.toISOString());
+      // // Verify validator 549419 rewards (37711+70458+37886+0) + (37621+70470+37907+0) = 146055 + 145998 = 292053
+      // expect(Number(stats549419!.clRewards?.toString())).toBe(292053);
     });
   });
 
@@ -262,7 +304,6 @@ describe('Epoch Processor E2E Tests', () => {
       beforeEach(async () => {
         // Clean up database (order matters due to foreign key constraints)
         await prisma.committee.deleteMany();
-        await prisma.slotProcessedData.deleteMany();
         await prisma.slot.deleteMany();
         await prisma.epoch.deleteMany();
 
@@ -306,7 +347,6 @@ describe('Epoch Processor E2E Tests', () => {
         // This runs once before all tests in this describe block
         // Clean up database (order matters due to foreign key constraints)
         await prisma.committee.deleteMany();
-        await prisma.slotProcessedData.deleteMany();
         await prisma.slot.deleteMany();
         await prisma.epoch.deleteMany();
 
@@ -624,7 +664,6 @@ describe('Epoch Processor E2E Tests', () => {
 
     beforeEach(async () => {
       // Clean up database
-      await prisma.slotProcessedData.deleteMany();
       await prisma.slot.deleteMany();
       await prisma.epoch.deleteMany();
 

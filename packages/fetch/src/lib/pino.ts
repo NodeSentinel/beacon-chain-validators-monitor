@@ -5,13 +5,18 @@ import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import Pino, { DestinationStream, pino } from 'pino';
 
-import { env } from '@/src/lib/env.js';
+// Note: We use process.env directly instead of importing from @/src/lib/env.js
+// because pino.ts is a low-level infrastructure module that only needs optional
+// logging configuration. Importing env.ts would require validating all blockchain
+// configuration variables (CHAIN, CONSENSUS_*, EXECUTION_*, etc.) which are not
+// needed for logging and would break in test environments where these variables
+// may not be set. This keeps the logging module decoupled from the full app config.
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Log configuration
-const LOG_OUTPUT = env.LOG_OUTPUT || 'console';
+// Log configuration - using process.env directly for flexibility
+const LOG_OUTPUT = process.env.LOG_OUTPUT || 'console';
 const logsDir = path.join(__dirname, '../../logs');
 
 // Function to get the current day's log file name
@@ -123,7 +128,7 @@ const createPinoLogger = () => {
 
   return pino(
     {
-      level: env.LOG_LEVEL || 'info',
+      level: process.env.LOG_LEVEL || 'info',
       timestamp: () => `,"time":"${new Date().toISOString()}"`,
       base: null, // This removes pid and hostname
       transport, // Use the transport configuration here

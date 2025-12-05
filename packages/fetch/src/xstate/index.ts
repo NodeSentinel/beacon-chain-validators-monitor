@@ -2,6 +2,7 @@ import { getCreateEpochActor, getEpochOrchestratorActor } from './epoch/index.js
 
 import { EpochController } from '@/src/services/consensus/controllers/epoch.js';
 import { SlotController } from '@/src/services/consensus/controllers/slot.js';
+import { ValidatorsController } from '@/src/services/consensus/controllers/validators.js';
 import { BeaconTime } from '@/src/services/consensus/utils/beaconTime.js';
 
 export default function initXstateMachines(
@@ -9,10 +10,17 @@ export default function initXstateMachines(
   beaconTime: BeaconTime,
   slotDuration: number,
   slotController: SlotController,
+  validatorsController: ValidatorsController,
 ) {
   getCreateEpochActor(epochController, slotDuration).start();
 
-  getEpochOrchestratorActor(epochController, beaconTime, slotDuration, slotController).start();
+  getEpochOrchestratorActor(
+    epochController,
+    beaconTime,
+    slotDuration,
+    slotController,
+    validatorsController,
+  ).start();
 
   // committeeCleanup: {
   //   invoke: {

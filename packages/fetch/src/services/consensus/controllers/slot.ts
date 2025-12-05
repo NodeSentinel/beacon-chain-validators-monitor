@@ -6,7 +6,8 @@ import { BeaconTime } from '../utils/beaconTime.js';
 import { SlotControllerHelpers } from './helpers/slotControllerHelpers.js';
 
 import { EpochStorage } from '@/src/services/consensus/storage/epoch.js';
-import { getUTCDatetimeRoundedToHour } from '@/src/utils/date/index.js';
+import { ExecutionClient } from '@/src/services/execution/execution.js';
+import { convertToUTC, getUTCDatetimeRoundedToHour } from '@/src/utils/date/index.js';
 
 /**
  * SlotController - Business logic layer for slot-related operations
@@ -17,15 +18,9 @@ export class SlotController extends SlotControllerHelpers {
     private readonly epochStorage: EpochStorage,
     private readonly beaconClient: BeaconClient,
     private readonly beaconTime: BeaconTime,
+    private readonly executionClient: ExecutionClient,
   ) {
     super();
-  }
-
-  /**
-   * Get slot by number with processing data
-   */
-  async getSlot(slot: number) {
-    return this.slotStorage.getSlot(slot);
   }
 
   /**
@@ -65,140 +60,79 @@ export class SlotController extends SlotControllerHelpers {
   }
 
   /**
-   * Check if a slot is ready to be processed based on CONSENSUS_DELAY_SLOTS_TO_HEAD
-   * TODO: delaySlotsToHead has to be handled on beaconTime class
+   * Get slot by number with processing data
+   * TODO: why is this needed? The epoch should create the slots and we shouldn't reach to this point
+   * if the slot is not created yet.
    */
-  async canSlotBeProcessed(slot: number, delaySlotsToHead: number) {
-    const currentSlot = this.beaconTime.getSlotNumberFromTimestamp(Date.now());
-    const maxSlotToFetch = currentSlot - delaySlotsToHead;
-    const isReady = slot <= maxSlotToFetch;
+  async getSlot(slot: number) {
+    return this.slotStorage.getSlot(slot);
+  }
+
+  /**
+   * Get the slot processing status for an epoch.
+   * Returns semantic information about whether there's a slot to process
+   * and whether all slots in the epoch are fully processed.
+   *
+   * This method is robust against the case where slots haven't been created yet,
+   * distinguishing between "no slots exist" and "all slots are processed".
+   */
+  async getEpochSlotsStatus(startSlot: number, endSlot: number) {
+    return this.slotStorage.getEpochSlotsStatus(startSlot, endSlot);
+  }
+
+  /**
+   * Wait until a slot is ready to be processed.
+   * Uses beaconTime to calculate exact wait time including delay slots to head.
+   */
+  async waitUntilSlotReady(slot: number) {
+    await this.beaconTime.waitUntilSlotStart(slot);
+  }
+
+  /**
+   * Fetch beacon block data for a slot.
+   */
+  async fetchBeaconBlock(slot: number) {
+    return this.beaconClient.getBlock(slot);
+  }
+
+  /**
+   * Get committee sizes for attestations in a beacon block.
+   * Returns the committee sizes and whether all slots have counts.
+   */
+  async getCommitteeSizesForBlock(slot: number, beaconBlockData: Block) {
+    const attestations = beaconBlockData.data.message.body.attestations || [];
+    const uniqueSlots = [...new Set(attestations.map((att) => parseInt(att.data.slot)))].filter(
+      (s) => s >= this.beaconTime.getLookbackSlot(),
+    );
+
+    if (uniqueSlots.length === 0) {
+      return {
+        committeesCountInSlot: {},
+        allSlotsHaveCounts: false,
+        uniqueSlots: [],
+      };
+    }
+
+    const committeesCountInSlot = await this.slotStorage.getCommitteeSizesForSlots(uniqueSlots);
+
+    const allSlotsHaveCounts = uniqueSlots.every((s) => {
+      const counts = committeesCountInSlot[s];
+      return counts && counts.length > 0;
+    });
 
     return {
-      isReady,
-      currentSlot,
-      maxSlotToFetch,
+      committeesCountInSlot,
+      allSlotsHaveCounts,
+      uniqueSlots,
     };
   }
 
   /**
-   * Check if sync committee data exists for a given epoch
-   */
-  async isSyncCommitteeFetchedForEpoch(epoch: number) {
-    return this.epochStorage.isSyncCommitteeForEpochInDB(epoch);
-  }
-
-  async areSlotConsensusRewardsFetched(slot: number) {
-    return this.slotStorage.areSlotConsensusRewardsFetched(slot);
-  }
-
-  async isSyncCommitteeFetchedForSlot(slot: number) {
-    return this.slotStorage.isSyncCommitteeFetchedForSlot(slot);
-  }
-
-  /**
-   * Find the next unprocessed slot between startSlot and endSlot
-   */
-  async findMinUnprocessedSlotInEpoch(startSlot: number, endSlot: number) {
-    try {
-      return await this.slotStorage.findMinUnprocessedSlotInEpoch(startSlot, endSlot);
-    } catch (error) {
-      console.error('Error finding next unprocessed slot:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Fetch and process execution layer rewards
-   * TODO: Implement using fetch/src/services/execution/endpoints.ts
-   * And move to block controller in service/execution
-   */
-  // async fetchELRewards(slot: number, block: number, timestamp: number) {
-  //   const blockInfo: Prisma.ExecutionRewardsUncheckedCreateInput = {
-  //     address: '0x0000000000000000000000000000000000000000',
-  //     timestamp: new Date(timestamp * 1000),
-  //     amount: '0',
-  //     blockNumber: block,
-  //   };
-
-  //   // Save execution rewards to database
-  //   await this.slotStorage.saveExecutionRewards(blockInfo);
-
-  //   // Update slot processing data
-  //   await this.slotStorage.updateSlotFlags(slot, { executionRewardsFetched: true });
-
-  //   return {
-  //     slot,
-  //     executionRewards: 0,
-  //   };
-  // }
-
-  /**
-   * Fetch and process sync committee rewards for a slot
-   */
-  async fetchSyncCommitteeRewards(slot: number, syncCommitteeValidators: string[]) {
-    const isSyncCommitteeFetched = await this.isSyncCommitteeFetchedForSlot(slot);
-    if (isSyncCommitteeFetched) {
-      return;
-    }
-
-    // Fetch sync committee rewards from beacon chain
-    const syncCommitteeRewards = await this.beaconClient.getSyncCommitteeRewards(
-      slot,
-      syncCommitteeValidators,
-    );
-
-    const slotTimestamp = await this.beaconTime.getTimestampFromSlotNumber(slot);
-    const datetime = getUTCDatetimeRoundedToHour(slotTimestamp);
-
-    // Prepare sync committee rewards for processing
-    const processedRewards = this.prepareSyncCommitteeRewards(syncCommitteeRewards, slot);
-
-    if (processedRewards.length > 0) {
-      // Process sync committee rewards and aggregate into hourly data
-      await this.slotStorage.processSyncCommitteeRewardsAndAggregate(
-        slot,
-        datetime,
-        processedRewards,
-      );
-    } else {
-      await this.slotStorage.updateSlotFlags(slot, { syncRewardsFetched: true });
-    }
-  }
-
-  /**
-   * Fetch and process block rewards for a slot
-   * These rewards are for the proposer of the block
-   */
-  async fetchSlotConsensusRewards(slot: number) {
-    const isBlockRewardsFetched = await this.areSlotConsensusRewardsFetched(slot);
-    if (isBlockRewardsFetched) {
-      return;
-    }
-
-    // Fetch block rewards from beacon chain
-    const blockRewards = await this.beaconClient.getBlockRewards(slot);
-    const blockRewardData = this.prepareBlockRewards(blockRewards);
-
-    if (blockRewardData) {
-      const slotTimestamp = await this.beaconTime.getTimestampFromSlotNumber(slot);
-      const datetime = getUTCDatetimeRoundedToHour(slotTimestamp);
-
-      // Process block rewards and aggregate into hourly data
-      await this.slotStorage.processSlotConsensusRewardsForSlot(
-        slot,
-        blockRewardData.proposerIndex,
-        datetime,
-        blockRewardData.blockReward,
-      );
-    } else {
-      await this.slotStorage.updateSlotFlags(slot, { consensusRewardsFetched: true });
-    }
-  }
-
-  /**
    * Process attestations for a slot
+   * Checks if already processed before processing.
+   * Throws an error if committee sizes are not available for all slots.
    */
-  private async processAttestations(slotNumber: number, attestations: Attestation[]) {
+  async processAttestations(slotNumber: number, attestations: Attestation[]) {
     // check if attestations are already processed
     const areAttestationsProcessed =
       await this.slotStorage.areAttestationsProcessedForSlot(slotNumber);
@@ -231,12 +165,133 @@ export class SlotController extends SlotControllerHelpers {
     await this.slotStorage.saveSlotAttestations(deduplicatedAttestations, slotNumber);
   }
 
-  private async processWithdrawals(
+  /**
+   * Fetch and save block rewards for a slot.
+   * Checks if already fetched before processing.
+   */
+  async fetchBlockRewards(slot: number, timestamp: number) {
+    const isAlreadyFetched = await this.slotStorage.areSlotConsensusRewardsFetched(slot);
+    if (isAlreadyFetched) {
+      return;
+    }
+
+    const blockRewards = await this.beaconClient.getBlockRewards(slot);
+
+    const { date, hour } = convertToUTC(new Date(timestamp * 1000));
+
+    const reward = this.prepareBlockRewards(blockRewards, hour, date);
+
+    await this.slotStorage.saveBlockRewardsAndUpdateSlot(slot, reward);
+  }
+
+  /**
+   * Fetch execution layer rewards for a slot.
+   * Checks if already fetched before processing.
+   */
+  async fetchExecutionRewards(slot: number, blockNumber: number) {
+    const isAlreadyFetched = await this.slotStorage.areExecutionRewardsFetched(slot);
+    if (isAlreadyFetched) {
+      return;
+    }
+
+    const blockInfo = await this.executionClient.getBlock(blockNumber);
+    if (!blockInfo) {
+      throw new Error(`Block ${blockNumber} not found`);
+    }
+
+    await this.slotStorage.saveExecutionRewardsAndUpdateSlot(slot, blockInfo);
+  }
+
+  /**
+   * Fetch and save sync committee rewards for a slot.
+   * Checks if already fetched before processing.
+   * Sync committee validators are fetched from the database (guaranteed to exist by epoch processor).
+   */
+  /**
+   * Fetch and process sync committee rewards for a slot
+   */
+  async fetchSyncCommitteeRewards(slot: number) {
+    const isSyncCommitteeFetched = await this.slotStorage.isSyncCommitteeFetchedForSlot(slot);
+    if (isSyncCommitteeFetched) {
+      return;
+    }
+
+    const epoch = this.beaconTime.getEpochFromSlot(slot);
+    const syncCommitteeValidators = (await this.slotStorage.getSyncCommitteeValidators(
+      epoch,
+    )) as string[];
+
+    // Fetch sync committee rewards from beacon chain
+    const syncCommitteeRewards = await this.beaconClient.getSyncCommitteeRewards(
+      slot,
+      syncCommitteeValidators,
+    );
+
+    // Handle missed slots
+    if (syncCommitteeRewards === 'SLOT MISSED') {
+      await this.slotStorage.updateSlotFlags(slot, { syncRewardsFetched: true });
+      return;
+    }
+
+    const slotTimestamp = await this.beaconTime.getTimestampFromSlotNumber(slot);
+    const datetime = getUTCDatetimeRoundedToHour(slotTimestamp);
+
+    // Prepare sync committee rewards for processing
+    const processedRewards = this.prepareSyncCommitteeRewards(syncCommitteeRewards, slot);
+
+    if (processedRewards.length === 0) {
+      await this.slotStorage.updateSlotFlags(slot, { syncRewardsFetched: true });
+      return;
+    }
+
+    // Process sync committee rewards and aggregate into hourly data
+    await this.slotStorage.processSyncCommitteeRewardsAndAggregate(
+      slot,
+      datetime,
+      processedRewards,
+    );
+  }
+
+  /**
+   * Fetch and process block rewards for a slot
+   * These rewards are for the proposer of the block
+   */
+  async fetchSlotConsensusRewards(slot: number) {
+    const isBlockRewardsFetched = await this.slotStorage.areSlotConsensusRewardsFetched(slot);
+    if (isBlockRewardsFetched) {
+      return;
+    }
+
+    // Fetch block rewards from beacon chain
+    const blockRewards = await this.beaconClient.getBlockRewards(slot);
+
+    if (blockRewards === 'SLOT MISSED' || !blockRewards.data) {
+      await this.slotStorage.updateSlotFlags(slot, { consensusRewardsFetched: true });
+      return;
+    }
+
+    const slotTimestamp = this.beaconTime.getTimestampFromSlotNumber(slot);
+    const datetime = getUTCDatetimeRoundedToHour(slotTimestamp);
+
+    // Process block rewards and aggregate into hourly data
+    await this.slotStorage.processSlotConsensusRewardsForSlot(
+      slot,
+      Number(blockRewards.data.proposer_index),
+      datetime,
+      BigInt(blockRewards.data.total),
+    );
+  }
+
+  /**
+   * Process execution payload withdrawals and save them to the database
+   * Checks if already processed before processing.
+   */
+  async processEpWithdrawals(
     slot: number,
     withdrawals: Block['data']['message']['body']['execution_payload']['withdrawals'],
   ) {
     const baseSlot = await this.slotStorage.getBaseSlot(slot);
-    if (baseSlot.validatorWithdrawalsFetched) {
+    if (baseSlot.epWithdrawalsFetched) {
       return;
     }
 
@@ -250,122 +305,26 @@ export class SlotController extends SlotControllerHelpers {
     );
   }
 
-  // TODO: move to execution controller
-  private async processExecutionRequests(
-    slot: number,
-    executionRequests: Block['data']['message']['body']['execution_requests'],
-  ) {
+  /**
+   * Process deposits from beacon block body
+   * Checks if already processed before processing.
+   */
+  async processDeposits(slot: number, deposits: Block['data']['message']['body']['deposits']) {
     const baseSlot = await this.slotStorage.getBaseSlot(slot);
-    if (baseSlot.executionRequestsFetched) {
+    if (baseSlot.depositsFetched) {
       return;
     }
 
-    if (!executionRequests) {
-      this.slotStorage.updateSlotFlags(slot, { executionRequestsFetched: true });
-      return;
-    }
-
-    await this.slotStorage.saveExecutionRequests(slot, {
-      validatorDeposits: executionRequests.deposits.map((deposit) => ({
+    await this.slotStorage.saveBodyDeposits(
+      baseSlot.slot,
+      deposits.map((deposit) => ({
         slot: baseSlot.slot,
-        pubkey: deposit.pubkey,
-        amount: BigInt(deposit.amount),
+        pubkey: deposit.data.pubkey,
+        withdrawalCredentials: deposit.data.withdrawal_credentials,
+        amount: BigInt(deposit.data.amount),
+        index: undefined,
       })),
-      //This field refers to withdrawal requests coming from the execution layer side,
-      // i.e., operations initiated via the execution layer contract to request a withdrawal (or exit)
-      // that the consensus layer will process.
-      validatorWithdrawalsRequests: executionRequests.withdrawals.map((withdrawal) => ({
-        slot: baseSlot.slot,
-        pubKey: withdrawal.validator_pubkey,
-        amount: BigInt(withdrawal.amount),
-      })),
-      validatorConsolidationsRequests: executionRequests.consolidations.map((consolidation) => ({
-        slot: baseSlot.slot,
-        sourcePubkey: consolidation.source_pubkey,
-        targetPubkey: consolidation.target_pubkey,
-      })),
-    });
-  }
-
-  async processSlotData(slot: number) {
-    const beaconBlock = await this.beaconClient.getBlock(slot);
-
-    if (beaconBlock === 'SLOT MISSED') {
-      await this.slotStorage.updateSlotProcessed(slot);
-      return;
-    }
-
-    const tasks: Promise<void>[] = [];
-    tasks.push(this.processAttestations(slot, beaconBlock.data.message.body.attestations));
-
-    // validators whose balances have become eligible for withdrawal
-    // (e.g., because they exited, or because their balance exceeded the effective balance cap)
-    // have had their funds moved from the consensus layer (beacon chain) into the execution layer accounts.
-    // MAX_WITHDRAWALS_PER_PAYLOAD
-    tasks.push(
-      this.processWithdrawals(slot, beaconBlock.data.message.body.execution_payload.withdrawals),
     );
-
-    tasks.push(
-      this.processExecutionRequests(slot, beaconBlock.data.message.body.execution_requests),
-    );
-
-    await Promise.all(tasks);
-
-    return beaconBlock;
-  }
-
-  /**
-   * Process sync committee attestations
-   * TODO: wtf is this?
-   */
-  // async processSyncCommitteeAttestations(input: {
-  //   slot: number;
-  //   epoch: number;
-  //   beaconBlockData?: Block; // TODO: fix this
-  // }) {
-  //   try {
-  //     // Simulate some processing time
-  //     await new Promise((resolve) => setTimeout(resolve, 100));
-
-  //     return {
-  //       slot: input.slot,
-  //       syncCommitteeAttestations: [
-  //         {
-  //           validatorIndex: Math.floor(Math.random() * 1000),
-  //         },
-  //       ],
-  //     };
-  //   } catch (error) {
-  //     console.error('Error processing sync committee attestations:', error);
-  //     throw error;
-  //   }
-  // }
-
-  /**
-   * Process withdrawals rewards from beacon block data
-   */
-  async processWithdrawalsRewards(
-    slot: number,
-    withdrawals: Block['data']['message']['body']['execution_payload']['withdrawals'],
-  ) {
-    const withdrawalRewards = this.formatWithdrawalRewards(withdrawals);
-
-    await this.slotStorage.updateSlotWithBeaconData(slot, {
-      withdrawalsRewards: withdrawalRewards,
-    });
-
-    return withdrawalRewards;
-  }
-
-  /**
-   * Process withdrawals rewards and return the data (for context updates)
-   */
-  async processWithdrawalsRewardsData(
-    slot: number,
-    withdrawals: Block['data']['message']['body']['execution_payload']['withdrawals'],
-  ) {
-    return this.formatWithdrawalRewards(withdrawals);
   }
 
   /**
@@ -388,59 +347,100 @@ export class SlotController extends SlotControllerHelpers {
   }
 
   /**
-   * Process CL deposits from beacon block
+   * Process voluntary exits from beacon block
+   * Checks if already processed before processing.
    */
-  async processClDeposits(slot: number, deposits: Block['data']['message']['body']['deposits']) {
-    console.log(`Processing CL deposits for slot ${slot}, found ${deposits.length} deposits`);
-    return deposits.map((deposit, index) => `cl_deposit_${slot}_${index}`);
-  }
-
-  /**
-   * Process CL voluntary exits from beacon block
-   */
-  async processClVoluntaryExits(
+  async processVoluntaryExits(
     slot: number,
     voluntaryExits: Block['data']['message']['body']['voluntary_exits'],
   ) {
-    console.log(
-      `Processing CL voluntary exits for slot ${slot}, found ${voluntaryExits.length} exits`,
+    const baseSlot = await this.slotStorage.getBaseSlot(slot);
+    if (baseSlot.voluntaryExitsFetched) {
+      return;
+    }
+
+    await this.slotStorage.saveValidatorExits(
+      baseSlot.slot,
+      voluntaryExits.map((exit) => ({
+        index: Number(exit.message.validator_index),
+        epoch: Number(exit.message.epoch),
+        slot: baseSlot.slot,
+        event: 'voluntary' as const,
+      })),
     );
-    return voluntaryExits.map((exit, index) => `cl_voluntary_exit_${slot}_${index}`);
   }
 
   /**
-   * Process EL deposits from execution payload
+   * Process execution requests deposits
+   * Checks if already processed before processing.
    */
-  async processElDeposits(
+  async processErDeposits(
     slot: number,
-    _executionPayload: Block['data']['message']['body']['execution_payload'],
+    deposits: NonNullable<Block['data']['message']['body']['execution_requests']>['deposits'],
   ) {
-    console.log(`Processing EL deposits for slot ${slot}`);
-    return [`el_deposit_${slot}_0`, `el_deposit_${slot}_1`];
-  }
+    const baseSlot = await this.slotStorage.getBaseSlot(slot);
+    if (baseSlot.erDepositsFetched) {
+      return;
+    }
 
-  /**
-   * Process EL withdrawals from execution payload
-   */
-  async processElWithdrawals(
-    slot: number,
-    withdrawals: Block['data']['message']['body']['execution_payload']['withdrawals'],
-  ) {
-    console.log(
-      `Processing EL withdrawals for slot ${slot}, found ${withdrawals.length} withdrawals`,
+    await this.slotStorage.saveValidatorDeposits(
+      baseSlot.slot,
+      deposits.map((deposit) => ({
+        slot: baseSlot.slot,
+        pubkey: deposit.pubkey,
+        withdrawalCredentials: deposit.withdrawal_credentials,
+        index: Number(deposit.index),
+        amount: BigInt(deposit.amount),
+      })),
     );
-    return withdrawals.map((withdrawal, index) => `el_withdrawal_${slot}_${index}`);
   }
 
   /**
-   * Process EL consolidations from execution payload
+   * Process execution requests withdrawals
+   * Checks if already processed before processing.
    */
-  async processElConsolidations(
+  async processErWithdrawals(
     slot: number,
-    _executionPayload: Block['data']['message']['body']['execution_payload'],
+    withdrawals: NonNullable<Block['data']['message']['body']['execution_requests']>['withdrawals'],
   ) {
-    console.log(`Processing EL consolidations for slot ${slot}`);
-    return [`el_consolidation_${slot}_0`];
+    const baseSlot = await this.slotStorage.getBaseSlot(slot);
+    if (baseSlot.erWithdrawalsFetched) {
+      return;
+    }
+
+    await this.slotStorage.saveValidatorWithdrawalsRequests(
+      baseSlot.slot,
+      withdrawals.map((withdrawal) => ({
+        slot: baseSlot.slot,
+        pubKey: withdrawal.validator_pubkey,
+        amount: BigInt(withdrawal.amount),
+      })),
+    );
+  }
+
+  /**
+   * Process execution requests consolidations
+   * Checks if already processed before processing.
+   */
+  async processErConsolidations(
+    slot: number,
+    consolidations: NonNullable<
+      Block['data']['message']['body']['execution_requests']
+    >['consolidations'],
+  ) {
+    const baseSlot = await this.slotStorage.getBaseSlot(slot);
+    if (baseSlot.erConsolidationsFetched) {
+      return;
+    }
+
+    await this.slotStorage.saveValidatorConsolidationsRequests(
+      baseSlot.slot,
+      consolidations.map((consolidation) => ({
+        slot: baseSlot.slot,
+        sourcePubkey: consolidation.source_pubkey,
+        targetPubkey: consolidation.target_pubkey,
+      })),
+    );
   }
 
   /**
@@ -456,15 +456,6 @@ export class SlotController extends SlotControllerHelpers {
    */
   async updateAttestationsProcessed(slot: number) {
     return this.slotStorage.updateAttestationsProcessed(slot);
-  }
-
-  /**
-   * Update withdrawals processed status in database
-   */
-  async updateWithdrawalsProcessed(slot: number) {
-    return this.slotStorage.updateSlotWithBeaconData(slot, {
-      withdrawalsRewards: [], // Empty array indicates processed but no withdrawals
-    });
   }
 
   /**
@@ -494,28 +485,6 @@ export class SlotController extends SlotControllerHelpers {
       console.error('Error updating validator statuses:', error);
       throw error;
     }
-  }
-
-  /**
-   * Update slot with beacon data in database
-   */
-  async updateSlotWithBeaconData(slot: number, beaconBlockData: Block) {
-    if (!beaconBlockData) {
-      throw new Error('Beacon block data is required');
-    }
-
-    // Update slot with processed status and beacon data
-    const updatedSlot = await this.slotStorage.updateSlotWithBeaconData(slot, {
-      withdrawalsRewards: [], // Processed separately
-      clDeposits: [], // Processed separately
-      clVoluntaryExits: [], // Processed separately
-      elDeposits: [], // Processed separately
-      elWithdrawals: [], // Processed separately
-      elConsolidations: [], // Processed separately
-    });
-
-    console.log(`Updated slot ${slot} with beacon data in database`);
-    return updatedSlot;
   }
 
   /**

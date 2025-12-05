@@ -61,8 +61,8 @@ The code is written in TypeScript and uses XState to orchestrate the data fetchi
 - `cp .env.example .env`
 - pnpm install
 - docker compose up postgres
-- pnpm db:prisma-generate
-- pnpm migrate:dev
+- pnpm db:generate
+- pnpm db:dev:reset
 - pnpm build
 - pnpm dev:fetch
 
@@ -207,15 +207,35 @@ The system uses XState to coordinate data processing through a hierarchical stat
 
 - `dev:fetch`: Start the fetch service in development mode with hot reload. Requires PostgreSQL to be running and database migrations to be applied.
 
-### Database Management
+### Database Management (Development Only)
 
-- `migrate:create`: Create a new migration
-- `migrate:dev`: Run migrations in development
+These commands are **only for development** and include safety checks to prevent execution in production:
+
+- **`db:dev:recreate-migration`**: Deletes all existing migrations and creates a fresh initial migration from the current schema. This is useful when you're iterating on schema changes and want to maintain only a base migration. Does not apply the migration to the database.
+
+- **`db:dev:reset`**: Resets the database (drops all tables and data) and reapplies the base migration. Use this when you want a clean slate with the current schema.
+
+- **`db:dev:update-schema`**: Updates the database with the latest schema changes using `db push`, then deletes existing migrations and creates a new initial migration. Use this when you've made schema changes and want to sync both the database and migration files.
 
 ### Database Operations
 
-- `db:generate`: Generate Prisma client and build database package
-- `db:studio`: Open Prisma Studio
+- **`db:generate`**: Generates Prisma client and builds the database package. Run this after schema changes.
+
+- **`db:studio`**: Opens Prisma Studio, a visual database browser and editor.
+
+- **`db:prune`**: Cleans database data (truncates tables) while preserving the database structure. Useful for clearing test data.
+
+### Prisma Commands
+
+Direct access to Prisma CLI commands (wrapped with database URL setup):
+
+- **`prisma:migrate`**: Runs `prisma migrate dev` - creates and applies incremental migrations (for development workflow with multiple migrations).
+
+- **`prisma:deploy`**: Runs `prisma migrate deploy` - applies pending migrations in production (safe for production use).
+
+- **`prisma:push`**: Runs `prisma db push` - updates database schema without creating migration files. Useful for rapid prototyping.
+
+- **`prisma:reset`**: Runs `prisma migrate reset` - resets the database and applies all migrations from scratch. **Use with caution**.
 
 ## Testing
 

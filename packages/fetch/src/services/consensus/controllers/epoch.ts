@@ -65,12 +65,15 @@ export class EpochController extends EpochControllerHelpers {
       // Get the last created epoch
       const lastEpoch = await this.getMaxEpoch();
       const unprocessedCount = await this.epochStorage.getUnprocessedCount();
+      const epochStartIndexing = this.beaconTime.getEpochFromSlot(
+        this.beaconClient.slotStartIndexing,
+      );
 
       // Get epochs to create based on the last epoch
       const epochsToCreate = this.getEpochsToCreate(
         unprocessedCount,
         lastEpoch,
-        this.beaconClient.slotStartIndexing,
+        epochStartIndexing,
         EpochController.maxUnprocessedEpochs,
       );
 
@@ -109,7 +112,7 @@ export class EpochController extends EpochControllerHelpers {
     // Create ideal rewards lookup, used to calculate missed rewards
     let idealRewardsLookup: ReturnType<typeof this.createIdealRewardsLookup> | null = null;
 
-    const allProcessedRewards: Array<{
+    let allProcessedRewards: Array<{
       validatorIndex: number;
       clRewards: bigint;
       clMissedRewards: bigint;
@@ -147,7 +150,9 @@ export class EpochController extends EpochControllerHelpers {
         epoch,
       );
 
-      allProcessedRewards.push(...epochRewardsData);
+      // Use concat instead of spread operator to avoid stack overflow with large arrays
+      // The spread operator can cause "Maximum call stack size exceeded" when arrays are very large
+      allProcessedRewards = allProcessedRewards.concat(epochRewardsData);
     }
 
     // Calculate datetime for hourly aggregation using BeaconTime
@@ -168,7 +173,8 @@ export class EpochController extends EpochControllerHelpers {
     }
 
     // Get committees from beacon chain
-    const committees = await this.beaconClient.getCommittees(epoch);
+    const { startSlot } = this.beaconTime.getEpochSlots(epoch);
+    const committees = await this.beaconClient.getCommittees(epoch, startSlot);
 
     // Prepare data for storage
     const { newSlots, newCommittees, committeesCountInSlot } = this.prepareCommitteeData(
@@ -284,7 +290,8 @@ export class EpochController extends EpochControllerHelpers {
    * Returns early if already processed
    */
   async fetchRewards(epoch: number): Promise<void> {
-    if (await this.isRewardsFetched(epoch)) {
+    const isFetched = await this.isRewardsFetched(epoch);
+    if (isFetched) {
       return;
     }
     await this.fetchEpochRewards(epoch);

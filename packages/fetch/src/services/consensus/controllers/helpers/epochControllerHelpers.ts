@@ -10,7 +10,7 @@ export abstract class EpochControllerHelpers {
   protected getEpochsToCreate(
     unprocessedCount: number,
     lastEpoch: number | null,
-    slotStartIndexing: number,
+    epochStartIndexing: number,
     maxUnprocessedEpochs: number = 5,
   ): number[] {
     // If we already have 5 or more unprocessed epochs, don't create new ones
@@ -21,8 +21,7 @@ export abstract class EpochControllerHelpers {
     // Calculate how many epochs we need to create
     const epochsNeeded = maxUnprocessedEpochs - unprocessedCount;
 
-    // Get the starting epoch for creation using slotStartIndexing
-    const startEpoch = lastEpoch ? lastEpoch + 1 : Math.floor(slotStartIndexing / 32);
+    const startEpoch = lastEpoch ? lastEpoch + 1 : epochStartIndexing;
 
     // Create array of epochs to create
     const epochsToCreate = [];
@@ -130,10 +129,10 @@ export abstract class EpochControllerHelpers {
    */
   protected prepareCommitteeData(
     committees: Awaited<ReturnType<BeaconClient['getCommittees']>>,
-    slotStartIndexing: number,
+    lookbackSlot: number,
   ) {
     const newCommittees: Committee[] = [];
-    // Map to track committee counts per committee index per slot (for Slot table's committeesCountInSlot)
+    // slot_committee_index > committee_count
     const committeesCountInSlot = new Map<number, number[]>();
     // Set to collect unique slots
     const newSlotsSet = new Set<number>();
@@ -143,7 +142,7 @@ export abstract class EpochControllerHelpers {
       const slot = +committee.slot;
 
       // Skip committees from slots before our indexing start point
-      if (slot < slotStartIndexing) {
+      if (slot < lookbackSlot) {
         return;
       }
 

@@ -1,4 +1,4 @@
-import { setup, assign, sendParent, stopChild, raise, ActorRefFrom, fromPromise } from 'xstate';
+import { setup, assign, sendParent, raise, ActorRefFrom, fromPromise, stopChild } from 'xstate';
 
 import { slotOrchestratorMachine, SlotsCompletedEvent } from '../slot/slotOrchestrator.machine.js';
 
@@ -80,10 +80,17 @@ export const epochProcessorMachine = setup({
       }: {
         input: {
           validatorsController: ValidatorsController;
+          epochController: EpochController;
           startSlot: number;
           epoch: number;
         };
       }) => {
+        // Check if validators balances are already fetched for this epoch
+        const isFetched = await input.epochController.isValidatorsBalancesFetched(input.epoch);
+        if (isFetched) {
+          return;
+        }
+
         await input.validatorsController.fetchValidatorsBalances(input.startSlot, input.epoch);
       },
     ),
@@ -93,11 +100,20 @@ export const epochProcessorMachine = setup({
       }: {
         input: {
           validatorsController: ValidatorsController;
+          epochController: EpochController;
+          beaconTime: BeaconTime;
           markValidatorsActivationFetched: (epoch: number) => Promise<void>;
           epoch: number;
         };
       }) => {
-        await input.validatorsController.trackTransitioningValidators();
+        // Check if validators activation tracking is already done for this epoch
+        const isFetched = await input.epochController.isValidatorsActivationFetched(input.epoch);
+        if (isFetched) {
+          return;
+        }
+
+        const { startSlot } = input.beaconTime.getEpochSlots(input.epoch);
+        await input.validatorsController.trackTransitioningValidators(startSlot);
         await input.markValidatorsActivationFetched(input.epoch);
       },
     ),
@@ -352,7 +368,6 @@ export const epochProcessorMachine = setup({
                 },
               },
             },
-
             syncingCommittees: {
               description:
                 'Get the sync committees for the epoch, it might be the case that they are already fetched, as the same committee last 256 epochs.',
@@ -385,7 +400,6 @@ export const epochProcessorMachine = setup({
                 },
               },
             },
-
             slotsProcessing: {
               description: 'Process slots for the epoch. Waits for committees to be ready.',
               initial: 'waitingForCommittees',
@@ -422,7 +436,6 @@ export const epochProcessorMachine = setup({
                           input: {
                             epoch: context.epoch,
                             lookbackSlot: context.config.lookbackSlot,
-                            slotDuration: context.config.slotDuration,
                             slotController: context.services.slotController,
                           },
                         });
@@ -478,7 +491,6 @@ export const epochProcessorMachine = setup({
                 },
               },
             },
-
             trackingValidatorsActivation: {
               description: 'Track validators transitioning between states',
               initial: 'waitingForEpochStart',
@@ -507,6 +519,8 @@ export const epochProcessorMachine = setup({
                         context.services.epochController.markValidatorsActivationFetched(epoch),
                       epoch: context.epoch,
                       validatorsController: context.services.validatorsController!,
+                      epochController: context.services.epochController,
+                      beaconTime: context.services.beaconTime,
                     }),
                     onDone: {
                       target: 'activationTracked',
@@ -525,7 +539,6 @@ export const epochProcessorMachine = setup({
                 },
               },
             },
-
             validatorsBalances: {
               description: 'Fetch validators balances for the epoch',
               initial: 'waitingForEpochStart',
@@ -551,6 +564,7 @@ export const epochProcessorMachine = setup({
                     src: 'fetchValidatorsBalances',
                     input: ({ context }) => ({
                       validatorsController: context.services.validatorsController!,
+                      epochController: context.services.epochController,
                       startSlot: context.startSlot,
                       epoch: context.epoch,
                     }),
@@ -577,7 +591,6 @@ export const epochProcessorMachine = setup({
                 },
               },
             },
-
             rewards: {
               description: 'Fetch rewards after balances and the epoch has ended',
               initial: 'waitingForBalances',

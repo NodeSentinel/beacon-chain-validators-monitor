@@ -1,8 +1,6 @@
 import axios, { AxiosError, AxiosInstance } from 'axios';
-import memoizee from 'memoizee';
-import ms from 'ms';
 
-import { logRequest, logResponse } from '@/src/lib/httpPino.js';
+import { logError, logRequest, logResponse } from '@/src/lib/httpPino.js';
 import {
   AttestationRewards,
   BlockRewards,
@@ -55,7 +53,7 @@ export class BeaconClient extends ReliableRequestClient {
     this.slotStartIndexing = config.slotStartIndexing;
     this.axiosInstance = axios.create();
     this.axiosInstance.interceptors.request.use(logRequest);
-    this.axiosInstance.interceptors.response.use(logResponse);
+    this.axiosInstance.interceptors.response.use(logResponse, logError);
   }
 
   /**
@@ -92,7 +90,10 @@ export class BeaconClient extends ReliableRequestClient {
   /**
    * Get committees for a specific epoch
    */
-  async getCommittees(epoch: number, stateId = 'head'): Promise<GetCommittees['data']> {
+  async getCommittees(
+    epoch: number,
+    stateId: string | number = 'head',
+  ): Promise<GetCommittees['data']> {
     return this.makeReliableRequest(
       async (url) => {
         const res = await this.axiosInstance.get<GetCommittees>(
@@ -100,7 +101,7 @@ export class BeaconClient extends ReliableRequestClient {
         );
         return res.data.data;
       },
-      this.isIndexerDelayed({ value: epoch, type: 'epoch' }) ? 'full' : 'archive',
+      this.isIndexerDelayed({ value: epoch, type: 'epoch' }) ? 'archive' : 'full',
     );
   }
 
@@ -128,7 +129,7 @@ export class BeaconClient extends ReliableRequestClient {
         return res.data;
       },
       'archive',
-      (error: Error | AxiosError) => {
+      (error: AxiosError) => {
         if (axios.isAxiosError(error) && error.response?.status === 404) {
           return 'SLOT MISSED';
         }
@@ -168,13 +169,21 @@ export class BeaconClient extends ReliableRequestClient {
       throw new Error('No validator IDs provided');
     }
 
-    return this.makeReliableRequest(async (url) => {
-      const res = await this.axiosInstance.post<GetValidatorsBalances>(
-        `${url}/eth/v1/beacon/states/${stateId}/validator_balances`,
-        validatorIds,
-      );
-      return res.data.data;
-    }, 'full');
+    return this.makeReliableRequest(
+      async (url) => {
+        const res = await this.axiosInstance.post<GetValidatorsBalances>(
+          `${url}/eth/v1/beacon/states/${stateId}/validator_balances`,
+          validatorIds,
+        );
+        return res.data.data;
+      },
+      'archive',
+      // typeof stateId === 'string' // when stateId is 'head', we use full node
+      //   ? 'full'
+      //   : this.isIndexerDelayed({ value: stateId as number, type: 'slot' })
+      //     ? 'full'
+      //     : 'archive',
+    );
   }
 
   /**
@@ -201,13 +210,16 @@ export class BeaconClient extends ReliableRequestClient {
    * Get attestation rewards for specific validators in an epoch
    */
   async getAttestationRewards(epoch: number, validatorIds: number[]): Promise<AttestationRewards> {
-    return this.makeReliableRequest(async (url) => {
-      const res = await this.axiosInstance.post<AttestationRewards>(
-        `${url}/eth/v1/beacon/rewards/attestations/${epoch}`,
-        validatorIds.map((id) => id.toString()),
-      );
-      return res.data;
-    }, 'full');
+    return this.makeReliableRequest(
+      async (url) => {
+        const res = await this.axiosInstance.post<AttestationRewards>(
+          `${url}/eth/v1/beacon/rewards/attestations/${epoch}`,
+          validatorIds.map((id) => id.toString()),
+        );
+        return res.data;
+      },
+      this.isIndexerDelayed({ value: epoch, type: 'epoch' }) ? 'archive' : 'full',
+    );
   }
 
   async getValidatorProposerDuties(epoch: number): Promise<ValidatorProposerDuties['data']> {
@@ -222,25 +234,18 @@ export class BeaconClient extends ReliableRequestClient {
   /**
    * Get block rewards for a specific slot (memoized)
    */
-  getBlockRewards = memoizee(
-    async (slot: number): Promise<BlockRewards | 'SLOT MISSED'> => {
-      return this.makeReliableRequest<BlockRewards | 'SLOT MISSED'>(
-        async (url) => {
-          const res = await this.axiosInstance.get<BlockRewards>(
-            `${url}/eth/v1/beacon/rewards/blocks/${slot}`,
-          );
-          return res.data;
-        },
-        this.isIndexerDelayed({ value: slot, type: 'slot' }) ? 'full' : 'archive',
-        (error) => this.handleSlotError(error),
-      );
-    },
-    {
-      promise: true,
-      maxAge: ms('10m'),
-      primitive: true,
-    },
-  );
+  getBlockRewards = async (slot: number): Promise<BlockRewards | 'SLOT MISSED'> => {
+    return this.makeReliableRequest<BlockRewards | 'SLOT MISSED'>(
+      async (url) => {
+        const res = await this.axiosInstance.get<BlockRewards>(
+          `${url}/eth/v1/beacon/rewards/blocks/${slot}`,
+        );
+        return res.data;
+      },
+      this.isIndexerDelayed({ value: slot, type: 'slot' }) ? 'archive' : 'full',
+      (error) => this.handleSlotError(error),
+    );
+  };
 
   /**
    * Get sync committee rewards for specific validators in a slot (memoized)
@@ -257,7 +262,7 @@ export class BeaconClient extends ReliableRequestClient {
         );
         return res.data;
       },
-      this.isIndexerDelayed({ value: slot, type: 'slot' }) ? 'full' : 'archive',
+      this.isIndexerDelayed({ value: slot, type: 'slot' }) ? 'archive' : 'full',
       (error) => this.handleSlotError(error),
     );
   };

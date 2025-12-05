@@ -157,85 +157,90 @@ export class EpochStorage {
   ) {
     await this.prisma.$transaction(
       async (tx) => {
-        // Process rewards in batches to avoid memory issues
-        // Note: epoch rewards are now stored in epochRewards table, not hourly_validator_data
-        // The rewards string format needs to be parsed to extract individual values
-        const batchSize = 50_000;
-        const batches = chunk(processedRewards, batchSize);
+        // Create temporary table using epoch_rewards as template
+        // This ensures the structure is always in sync with the main table
+        // No indexes or constraints are copied, which improves performance
+        await tx.$executeRaw`
+          CREATE TEMPORARY TABLE tmp_epoch_rewards (LIKE epoch_rewards) ON COMMIT DROP;
+        `;
+
+        // Parse all rewards strings before bulk insert
+        const parsedRewards = processedRewards.map((validator) => {
+          // Parse rewards string: 'epoch:head:target:source:inactivity:missedHead:missedTarget:missedSource:missedInactivity'
+          const rewardsParts = validator.rewards.split(':');
+          return {
+            epoch,
+            validatorIndex: validator.validatorIndex,
+            head: BigInt(rewardsParts[1] || '0'),
+            target: BigInt(rewardsParts[2] || '0'),
+            source: BigInt(rewardsParts[3] || '0'),
+            inactivity: BigInt(rewardsParts[4] || '0'),
+            missedHead: BigInt(rewardsParts[5] || '0'),
+            missedTarget: BigInt(rewardsParts[6] || '0'),
+            missedSource: BigInt(rewardsParts[7] || '0'),
+            missedInactivity: BigInt(rewardsParts[8] || '0'),
+          };
+        });
+
+        // Bulk insert into temporary table using VALUES in batches
+        // PostgreSQL limit: 32,767 bind variables per prepared statement
+        // With 10 columns per row, max batch size = 32,767 / 10 ≈ 3,200 rows
+        // Using 10,000 rows per batch for better performance (using executeRawUnsafe)
+        const batchSize = 10_000;
+        const batches = chunk(parsedRewards, batchSize);
         for (const batch of batches) {
-          // Save epoch rewards to epochRewards table
-          for (const validator of batch) {
-            // Parse rewards string: 'epoch:head:target:source:inactivity:missedHead:missedTarget:missedSource:missedInactivity'
-            const rewardsParts = validator.rewards.split(':');
-            const head = BigInt(rewardsParts[1] || '0');
-            const target = BigInt(rewardsParts[2] || '0');
-            const source = BigInt(rewardsParts[3] || '0');
-            const inactivity = BigInt(rewardsParts[4] || '0');
-            const missedHead = BigInt(rewardsParts[5] || '0');
-            const missedTarget = BigInt(rewardsParts[6] || '0');
-            const missedSource = BigInt(rewardsParts[7] || '0');
-            const missedInactivity = BigInt(rewardsParts[8] || '0');
-
-            await tx.epochRewards.upsert({
-              where: {
-                epoch_validatorIndex: {
-                  epoch,
-                  validatorIndex: validator.validatorIndex,
-                },
-              },
-              create: {
-                epoch,
-                validatorIndex: validator.validatorIndex,
-                head,
-                target,
-                source,
-                inactivity,
-                missedHead,
-                missedTarget,
-                missedSource,
-                missedInactivity,
-              },
-              update: {
-                head,
-                target,
-                source,
-                inactivity,
-                missedHead,
-                missedTarget,
-                missedSource,
-                missedInactivity,
-              },
-            });
-          }
-        }
-
-        // Aggregate rewards into HourlyValidatorStats using pre-calculated values
-        // Process in batches to avoid SQL parameter limits
-        const statsBatchSize = 1000;
-        const statsBatches = chunk(processedRewards, statsBatchSize);
-
-        for (const statsBatch of statsBatches) {
-          const valuesClause = statsBatch
+          const valuesClause = batch
             .map(
               (r) =>
-                `(${r.validatorIndex}, ${r.clRewards.toString()}, ${r.clMissedRewards.toString()})`,
+                `(${r.epoch}, ${r.validatorIndex}, ${r.head.toString()}, ${r.target.toString()}, ${r.source.toString()}, ${r.inactivity.toString()}, ${r.missedHead.toString()}, ${r.missedTarget.toString()}, ${r.missedSource.toString()}, ${r.missedInactivity.toString()})`,
             )
             .join(',');
 
           await tx.$executeRawUnsafe(`
-            INSERT INTO hourly_validator_stats 
-              (datetime, validator_index, cl_rewards, cl_missed_rewards)
-            SELECT 
-              '${datetime.toISOString()}'::timestamp as datetime,
-              validator_index,
-              cl_rewards,
-              cl_missed_rewards
-            FROM (VALUES ${valuesClause}) AS rewards(validator_index, cl_rewards, cl_missed_rewards)
-            ON CONFLICT (datetime, validator_index) DO UPDATE SET
-              cl_rewards = hourly_validator_stats.cl_rewards + EXCLUDED.cl_rewards,
-              cl_missed_rewards = hourly_validator_stats.cl_missed_rewards + EXCLUDED.cl_missed_rewards
+            INSERT INTO tmp_epoch_rewards 
+              (epoch, validator_index, head, target, source, inactivity, missed_head, missed_target, missed_source, missed_inactivity)
+            VALUES ${valuesClause}
           `);
         }
+
+        // Merge from temporary table to main table
+        // If duplicates exist, PostgreSQL will throw a constraint violation error
+        // This is the desired behavior - duplicates should not exist
+        await tx.$executeRaw`
+          INSERT INTO epoch_rewards 
+            (epoch, validator_index, head, target, source, inactivity, missed_head, missed_target, missed_source, missed_inactivity)
+          SELECT 
+            epoch, validator_index, head, target, source, inactivity, missed_head, missed_target, missed_source, missed_inactivity
+          FROM tmp_epoch_rewards
+        `;
+
+        // Aggregate rewards into HourlyValidatorStats using pre-calculated values
+        // Process in batches to avoid SQL parameter limits
+        // const statsBatchSize = 1000;
+        // const statsBatches = chunk(processedRewards, statsBatchSize);
+
+        // for (const statsBatch of statsBatches) {
+        //   const valuesClause = statsBatch
+        //     .map(
+        //       (r) =>
+        //         `(${r.validatorIndex}, ${r.clRewards.toString()}, ${r.clMissedRewards.toString()})`,
+        //     )
+        //     .join(',');
+
+        //   await tx.$executeRawUnsafe(`
+        //     INSERT INTO hourly_validator_stats
+        //       (datetime, validator_index, cl_rewards, cl_missed_rewards)
+        //     SELECT
+        //       '${datetime.toISOString()}'::timestamp as datetime,
+        //       validator_index,
+        //       cl_rewards,
+        //       cl_missed_rewards
+        //     FROM (VALUES ${valuesClause}) AS rewards(validator_index, cl_rewards, cl_missed_rewards)
+        //     ON CONFLICT (datetime, validator_index) DO UPDATE SET
+        //       cl_rewards = hourly_validator_stats.cl_rewards + EXCLUDED.cl_rewards,
+        //       cl_missed_rewards = hourly_validator_stats.cl_missed_rewards + EXCLUDED.cl_missed_rewards
+        //   `);
+        // }
 
         // Mark epoch as rewardsFetched = true (rewardsAggregated is no longer needed)
         await tx.epoch.update({
@@ -244,7 +249,7 @@ export class EpochStorage {
         });
       },
       {
-        timeout: ms('2m'),
+        timeout: ms('4m'),
       },
     );
   }

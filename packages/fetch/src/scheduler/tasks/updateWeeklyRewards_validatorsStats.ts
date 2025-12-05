@@ -22,7 +22,7 @@ async function updateWeeklyRewardsTask(logger: CustomLogger) {
       
       user_validators AS (
         SELECT DISTINCT "B" as validator_id
-        FROM "_UserToValidator"
+        FROM _user_to_validator
       ),
       
       -------------------------------------
@@ -31,15 +31,15 @@ async function updateWeeklyRewardsTask(logger: CustomLogger) {
 
       cl_attestation_rewards AS (
         SELECT 
-          dvs."validatorIndex",
+          dvs."validator_index",
           COALESCE(SUM(CAST(dvs.head AS BIGINT)), 0) + 
           COALESCE(SUM(CAST(dvs.target AS BIGINT)), 0) + 
           COALESCE(SUM(CAST(dvs.source AS BIGINT)), 0) + 
           COALESCE(SUM(CAST(dvs.inactivity AS BIGINT)), 0) as weekly_cl_rewards
         FROM user_validators uv
-        INNER JOIN "DailyValidatorStats" dvs ON dvs."validatorIndex" = uv.validator_id
+        INNER JOIN "DailyValidatorStats" dvs ON dvs."validator_index" = uv.validator_id
         WHERE dvs.date >= CURRENT_DATE - INTERVAL '7 days'
-        GROUP BY dvs."validatorIndex"
+        GROUP BY dvs."validator_index"
       ),
 
       -------------------------------------
@@ -48,13 +48,13 @@ async function updateWeeklyRewardsTask(logger: CustomLogger) {
 
       cl_block_and_sync_rewards AS (
         SELECT 
-          dvs."validatorIndex",
-          COALESCE(SUM(CAST(dvs."syncCommittee" AS BIGINT)), 0) +
-          COALESCE(SUM(CAST(dvs."blockReward" AS BIGINT)), 0) as weekly_cl_rewards
+          dvs."validator_index",
+          COALESCE(SUM(CAST(dvs."sync_committee" AS BIGINT)), 0) +
+          COALESCE(SUM(CAST(dvs."block_reward" AS BIGINT)), 0) as weekly_cl_rewards
         FROM user_validators uv
-        INNER JOIN "DailyValidatorStats" dvs ON dvs."validatorIndex" = uv.validator_id
+        INNER JOIN "DailyValidatorStats" dvs ON dvs."validator_index" = uv.validator_id
         WHERE dvs.date >= CURRENT_DATE - INTERVAL '7 days'
-        GROUP BY dvs."validatorIndex"
+        GROUP BY dvs."validator_index"
       ),
 
       -------------------------------------
@@ -63,10 +63,10 @@ async function updateWeeklyRewardsTask(logger: CustomLogger) {
 
       cl_rewards_combined AS (
         SELECT 
-          COALESCE(att."validatorIndex", bas."validatorIndex") as "validatorIndex",
+          COALESCE(att."validator_index", bas."validator_index") as "validator_index",
           COALESCE(att.weekly_cl_rewards, 0) + COALESCE(bas.weekly_cl_rewards, 0) as weekly_cl_rewards
         FROM cl_attestation_rewards att
-        FULL OUTER JOIN cl_block_and_sync_rewards bas ON att."validatorIndex" = bas."validatorIndex"
+        FULL OUTER JOIN cl_block_and_sync_rewards bas ON att."validator_index" = bas."validator_index"
       ),
 
       -------------------------------------
@@ -78,8 +78,8 @@ async function updateWeeklyRewardsTask(logger: CustomLogger) {
         SELECT 
           uv."B" as validator_id,
           COALESCE(SUM(CAST(er.amount AS BIGINT)), 0) as weekly_el_rewards
-        FROM "_UserToValidator" uv
-        JOIN "_FeeRewardAddressToUser" fra ON fra."B" = uv."A"
+        FROM _user_to_validator uv
+        JOIN _user_to_fee_reward_address fra ON fra."B" = uv."A"
         JOIN "ExecutionRewards" er ON LOWER(er.address) = LOWER(fra."A")
         WHERE er.timestamp >= NOW() - INTERVAL '7 days'
         GROUP BY uv."B"
@@ -91,12 +91,12 @@ async function updateWeeklyRewardsTask(logger: CustomLogger) {
       
       INSERT INTO "ValidatorsStats" ("validatorId", "weeklyCLRewards", "weeklyELRewards", "timestamp")
       SELECT 
-        cl."validatorIndex",
+        cl."validator_index",
         cl.weekly_cl_rewards,
         COALESCE(el.weekly_el_rewards, 0),
         NOW()
       FROM cl_rewards_combined cl
-      LEFT JOIN el_rewards el ON el.validator_id = cl."validatorIndex"
+      LEFT JOIN el_rewards el ON el.validator_id = cl."validator_index"
       ON CONFLICT ("validatorId") 
       DO UPDATE SET
         "weeklyCLRewards" = EXCLUDED."weeklyCLRewards",
