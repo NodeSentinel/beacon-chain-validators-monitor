@@ -126,10 +126,15 @@ export abstract class EpochControllerHelpers {
 
   /**
    * Prepare committee data for storage
+   * Validates that beacon chain returned the expected number of slots for the epoch
+   * Throws if slot count doesn't match
    */
   protected prepareCommitteeData(
     committees: Awaited<ReturnType<BeaconClient['getCommittees']>>,
     lookbackSlot: number,
+    epoch: number,
+    epochStartSlot: number,
+    epochEndSlot: number,
   ) {
     const newCommittees: Committee[] = [];
     // slot_committee_index > committee_count
@@ -137,8 +142,8 @@ export abstract class EpochControllerHelpers {
     // Set to collect unique slots
     const newSlotsSet = new Set<number>();
 
+    // Process committees returned by beacon chain
     committees.forEach((committee) => {
-      // Convert slot string to number
       const slot = +committee.slot;
 
       // Skip committees from slots before our indexing start point
@@ -172,9 +177,21 @@ export abstract class EpochControllerHelpers {
       });
     });
 
-    // Validate that we have data to process
-    if (newSlotsSet.size === 0 || newCommittees.length === 0) {
-      throw new Error('No new slots or committees to save');
+    // Calculate expected number of slots for this epoch (respecting lookbackSlot)
+    const firstSlotToCreate = Math.max(lookbackSlot, epochStartSlot);
+    const expectedSlotCount = epochEndSlot - firstSlotToCreate + 1;
+    // Verify beacon chain returned the expected number of slots
+    if (newSlotsSet.size !== expectedSlotCount) {
+      throw new Error(
+        `Beacon chain did not return the expected number of slots for epoch ${epoch}. ` +
+          `Expected ${expectedSlotCount} slots (${firstSlotToCreate}-${epochEndSlot}), ` +
+          `but received ${newSlotsSet.size} slots`,
+      );
+    }
+
+    // Additional validation: ensure we have committees data
+    if (newCommittees.length === 0) {
+      throw new Error(`No committees data returned for epoch ${epoch}`);
     }
 
     // Return processed data for storage

@@ -173,13 +173,16 @@ export class EpochController extends EpochControllerHelpers {
     }
 
     // Get committees from beacon chain
-    const { startSlot } = this.beaconTime.getEpochSlots(epoch);
+    const { startSlot, endSlot } = this.beaconTime.getEpochSlots(epoch);
     const committees = await this.beaconClient.getCommittees(epoch, startSlot);
 
-    // Prepare data for storage
+    // Prepare data for storage - will throw if beacon chain didn't return all expected slots
     const { newSlots, newCommittees, committeesCountInSlot } = this.prepareCommitteeData(
       committees,
       this.beaconTime.getLookbackSlot(),
+      epoch,
+      startSlot,
+      endSlot,
     );
 
     // Save to database
