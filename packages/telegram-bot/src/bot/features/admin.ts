@@ -8,6 +8,7 @@ import { adminHelpHandler } from '@/src/bot/handlers/commands/admin.js';
 import { setCommandsHandler } from '@/src/bot/handlers/commands/setcommands.js';
 import { createCommunicationHandler } from '@/src/bot/handlers/communications/create.js';
 import { listCommunicationsHandler } from '@/src/bot/handlers/communications/list.js';
+import { communicationResultsHandler } from '@/src/bot/handlers/communications/results.js';
 import { sendCommunicationHandler } from '@/src/bot/handlers/communications/send.js';
 import { logHandle } from '@/src/bot/helpers/logging.js';
 
@@ -43,6 +44,13 @@ feature.command(
   logHandle('command-send-communication'),
   chatAction('typing'),
   sendCommunicationHandler,
+);
+
+feature.command(
+  'communication_results',
+  logHandle('command-communication-results'),
+  chatAction('typing'),
+  communicationResultsHandler,
 );
 
 export { composer as adminFeature };

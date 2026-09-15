@@ -32,6 +32,7 @@ export function createBotRouter(
     setIncidentClosedNotified: incidentNotifications.markBotIncidentClosedNotified,
     setIncidentOpenedNotified: incidentNotifications.markBotIncidentOpenedNotified,
     markCommunicationSent: communications.markBotCommunicationSent,
+    recordCommunicationResponse: communications.recordBotCommunicationResponse,
     setNotificationDelivered: notifications.markBotNotificationDelivered,
     users: users.listBotUsers,
     updateMessageId: users.updateBotUserMessageId,

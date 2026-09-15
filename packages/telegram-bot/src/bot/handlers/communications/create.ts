@@ -5,7 +5,8 @@ import { parseCreateCommunicationCommand } from './create-parser.js';
 import { COMMON_REQUESTS_TELEGRAM_ID, getRpcClientForUser } from '@/src/api/client.js';
 import type { Context } from '@/src/bot/context.js';
 
-const CREATE_COMMUNICATION_USAGE = 'Usage: /create_communication <description> >> <message>';
+const CREATE_COMMUNICATION_USAGE =
+  'Usage: /create_communication <description> >> <message> [>> <accept label> | <cancel label>]';
 
 /**
  * Creates a pending communication and returns its id to the admin.
@@ -24,6 +25,7 @@ export async function createCommunicationHandler(ctx: CommandContext<Context>) {
     message: parsed.message,
     exclude: [],
     onlyTo: [],
+    options: parsed.options,
   });
 
   if (!response.success || !response.data) {

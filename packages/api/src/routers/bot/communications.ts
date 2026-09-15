@@ -7,10 +7,12 @@ import { createBotProcedure } from '@/routers/bot/procedures.js';
 import {
   BotCommunicationDetailsSchema,
   BotCommunicationListSchema,
+  BotCommunicationResponseRecordedSchema,
   BotCommunicationSchema,
   BotCommunicationSentSchema,
   CommunicationIdParamSchema,
   CreateBotCommunicationSchema,
+  RecordBotCommunicationResponseSchema,
 } from '@/routers/bot/schemas.js';
 import { resolveCommunicationRecipients } from '@/storage/bot-communication-recipients.js';
 import { ApiResponseSchema, errorResponse, successResponse } from '@/utils/response.js';
@@ -27,6 +29,13 @@ type BotCommunicationDetailsResponse = z.infer<typeof BotCommunicationDetailsRes
 const BotCommunicationSentResponseSchema = ApiResponseSchema(BotCommunicationSentSchema);
 type BotCommunicationSentResponse = z.infer<typeof BotCommunicationSentResponseSchema>;
 
+const BotCommunicationResponseRecordedResponseSchema = ApiResponseSchema(
+  BotCommunicationResponseRecordedSchema,
+);
+type BotCommunicationResponseRecordedResponse = z.infer<
+  typeof BotCommunicationResponseRecordedResponseSchema
+>;
+
 /**
  * Maps a communication row into the API response shape.
  */
@@ -36,6 +45,7 @@ function mapCommunication(communication: {
   message: string;
   exclude: string[];
   onlyTo: string[];
+  options: string[];
   sent: boolean;
   sentAt: Date | null;
   createdAt: Date;
@@ -46,6 +56,7 @@ function mapCommunication(communication: {
     message: communication.message,
     exclude: communication.exclude,
     onlyTo: communication.onlyTo,
+    options: communication.options,
     sent: communication.sent,
     sentAt: communication.sentAt?.toISOString() ?? null,
     createdAt: communication.createdAt.toISOString(),
@@ -112,9 +123,20 @@ export function createBotCommunicationsRoutes(
             ? []
             : await params.botCommunicationsStorage.listBroadcastTelegramIds();
 
+        const groupedCounts = await params.botCommunicationsStorage.countResponsesByOption(
+          communication.id,
+        );
+
         return successResponse({
           ...mapCommunication(communication),
           recipients: resolveCommunicationRecipients(broadcastTelegramIds, communication),
+          responses: groupedCounts
+            .flatMap(({ count, optionIndex }) => {
+              const label = communication.options[optionIndex];
+
+              return label === undefined ? [] : [{ optionIndex, label, count }];
+            })
+            .sort((left, right) => left.optionIndex - right.optionIndex),
         }) as BotCommunicationDetailsResponse;
       } catch (error) {
         return errorResponse(
@@ -150,10 +172,52 @@ export function createBotCommunicationsRoutes(
       }
     });
 
+  const recordBotCommunicationResponse = botProcedure
+    .route({ method: 'POST', path: '/bot/communications/{id}/responses' })
+    .input(RecordBotCommunicationResponseSchema)
+    .output(BotCommunicationResponseRecordedResponseSchema)
+    .handler(async ({ context, input }: any) => {
+      try {
+        const communication = await params.botCommunicationsStorage.findById(input.id);
+
+        if (!communication) {
+          throw new ORPCError('NOT_FOUND', {
+            message: `Communication ${input.id} was not found`,
+          });
+        }
+
+        // Guard the index against stale keyboards: an old message can still carry
+        // an option that no longer exists on the communication.
+        if (input.optionIndex >= communication.options.length) {
+          throw new ORPCError('BAD_REQUEST', {
+            message: `Communication ${input.id} has no option ${input.optionIndex}`,
+          });
+        }
+
+        await params.botCommunicationsStorage.recordResponse({
+          communicationId: input.id,
+          telegramId: context.botTelegramId,
+          optionIndex: input.optionIndex,
+        });
+
+        return successResponse({
+          id: input.id,
+          optionIndex: input.optionIndex,
+          recorded: true,
+        }) as BotCommunicationResponseRecordedResponse;
+      } catch (error) {
+        return errorResponse(
+          'RECORD_COMMUNICATION_RESPONSE_ERROR',
+          error instanceof Error ? error.message : 'Failed to record response',
+        ) as BotCommunicationResponseRecordedResponse;
+      }
+    });
+
   return {
     createBotCommunication,
     getBotCommunication,
     listBotCommunications,
     markBotCommunicationSent,
+    recordBotCommunicationResponse,
   };
 }

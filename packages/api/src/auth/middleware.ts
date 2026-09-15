@@ -79,7 +79,12 @@ export function createAuthProcedures(deps: AuthProcedureDeps) {
       deps.authenticateBotSignature(botSignature, botUserId, botTimestamp);
       const user = await resolveBotUser(botUserId);
       return next({
-        context: { ...context, user: user ?? undefined, authStrategy: AuthStrategy.BOT_SIGNATURE },
+        context: {
+          ...context,
+          user: user ?? undefined,
+          authStrategy: AuthStrategy.BOT_SIGNATURE,
+          botTelegramId: botUserId,
+        },
       });
     }
 

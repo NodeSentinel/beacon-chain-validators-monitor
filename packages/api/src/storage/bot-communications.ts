@@ -14,6 +14,7 @@ export class BotCommunicationsStorage {
     message: string;
     exclude: string[];
     onlyTo: string[];
+    options: string[];
   }) {
     return this.prisma.communication.create({
       data: {
@@ -21,6 +22,7 @@ export class BotCommunicationsStorage {
         message: input.message,
         exclude: input.exclude,
         onlyTo: input.onlyTo,
+        options: input.options,
       },
     });
   }
@@ -71,6 +73,53 @@ export class BotCommunicationsStorage {
 
     // Convert database bigint values into telegram ids the bot can send to directly.
     return users.map((user) => user.telegramId!.toString());
+  }
+
+  /**
+   * Stores the option a user picked for a communication.
+   * Uses an upsert so a repeated tap, which can only happen if the delivered
+   * message survives the client-side delete, never fails the button handler.
+   */
+  async recordResponse(input: {
+    communicationId: number;
+    telegramId: string;
+    optionIndex: number;
+  }) {
+    return this.prisma.communicationResponse.upsert({
+      where: {
+        communicationId_telegramId: {
+          communicationId: input.communicationId,
+          telegramId: input.telegramId,
+        },
+      },
+      create: {
+        communicationId: input.communicationId,
+        telegramId: input.telegramId,
+        optionIndex: input.optionIndex,
+      },
+      update: {
+        optionIndex: input.optionIndex,
+        respondedAt: new Date(),
+      },
+    });
+  }
+
+  /**
+   * Counts the answers of one communication grouped by the option index.
+   * Options nobody picked are absent from the result, so callers must pad the
+   * missing indexes themselves.
+   */
+  async countResponsesByOption(communicationId: number) {
+    const grouped = await this.prisma.communicationResponse.groupBy({
+      by: ['optionIndex'],
+      where: { communicationId },
+      _count: { _all: true },
+    });
+
+    return grouped.map((group) => ({
+      optionIndex: group.optionIndex,
+      count: group._count._all,
+    }));
   }
 
   /**

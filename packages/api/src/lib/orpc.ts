@@ -17,6 +17,7 @@ export interface BaseContext {
   headers: Record<string, string | string[] | undefined>;
   user?: DbUser;
   authStrategy?: AuthStrategy;
+  botTelegramId?: string;
 }
 
 /**

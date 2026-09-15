@@ -71,6 +71,8 @@ export const CreateBotCommunicationSchema = z.object({
   message: z.string().min(1),
   exclude: z.array(z.string()).default([]),
   onlyTo: z.array(z.string()).default([]),
+  // Button labels in semantic order, primary action first. Empty means plain text.
+  options: z.array(z.string().min(1)).max(2).default([]),
 });
 
 export const BotCommunicationSchema = z.object({
@@ -79,6 +81,7 @@ export const BotCommunicationSchema = z.object({
   message: z.string(),
   exclude: z.array(z.string()),
   onlyTo: z.array(z.string()),
+  options: z.array(z.string()),
   sent: z.boolean(),
   sentAt: z.string().nullable(),
   createdAt: z.string(),
@@ -88,9 +91,27 @@ export const BotCommunicationListSchema = z.array(BotCommunicationSchema);
 
 export const BotCommunicationDetailsSchema = BotCommunicationSchema.extend({
   recipients: z.array(z.string()),
+  responses: z.array(
+    z.object({
+      optionIndex: z.number().int().nonnegative(),
+      label: z.string(),
+      count: z.number().int().positive(),
+    }),
+  ),
 });
 
 export const BotCommunicationSentSchema = z.object({
   id: z.number().int().positive(),
   sent: z.literal(true),
+});
+
+export const RecordBotCommunicationResponseSchema = z.object({
+  id: z.coerce.number().int().positive(),
+  optionIndex: z.number().int().nonnegative(),
+});
+
+export const BotCommunicationResponseRecordedSchema = z.object({
+  id: z.number().int().positive(),
+  optionIndex: z.number().int().nonnegative(),
+  recorded: z.literal(true),
 });

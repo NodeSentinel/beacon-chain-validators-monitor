@@ -579,11 +579,36 @@ model Communication {
   message     String    @map("message")
   exclude     String[]  @default([]) @map("exclude")
   onlyTo      String[]  @default([]) @map("only_to")
+  /// Inline button labels in semantic order: the first entry is the primary
+  /// action. An empty list means the communication ships as plain text.
+  options     String[]  @default([]) @map("options")
   sent        Boolean   @default(false) @map("sent")
   sentAt      DateTime? @map("sent_at") @db.Timestamp
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamp
 
+  responses CommunicationResponse[]
+
   @@map("communication")
+}
+
+/**
+ * CommunicationResponse - one answer per user for a communication sent with
+ * option buttons. The stored index points at Communication.options in semantic
+ * order, not at the rendered keyboard position, so past answers keep their
+ * meaning even if the layout or the labels change later. Users are identified by
+ * telegram id because the button tap only carries the telegram identity.
+ */
+model CommunicationResponse {
+  id              Int      @id @default(autoincrement()) @map("id")
+  communicationId Int      @map("communication_id")
+  telegramId      String   @map("telegram_id")
+  optionIndex     Int      @map("option_index")
+  respondedAt     DateTime @default(now()) @map("responded_at") @db.Timestamp
+
+  communication Communication @relation(fields: [communicationId], references: [id], onDelete: Cascade)
+
+  @@unique([communicationId, telegramId])
+  @@map("communication_response")
 }
 
 model ClusterIncident {

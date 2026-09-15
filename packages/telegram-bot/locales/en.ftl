@@ -22,6 +22,11 @@ language-changed = Language successfully changed!
 
 admin-commands-updated = Commands updated.
 
+## Communication Response Feature
+
+communication-response-recorded = Thanks!
+communication-response-failed = Your answer could not be saved. Please try again.
+
 ## Unhandled Feature
 
 unhandled = Unrecognized command. Try /start

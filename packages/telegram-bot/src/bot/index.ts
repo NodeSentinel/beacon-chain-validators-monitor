@@ -8,6 +8,7 @@ import type { BotConfig } from 'grammy';
 import type { Context } from '@/src/bot/context.js';
 
 import { adminFeature } from '@/src/bot/features/admin.js';
+import { communicationResponseFeature } from '@/src/bot/features/communication-response.js';
 import { languageFeature } from '@/src/bot/features/language.js';
 import { removeMessageFeature } from '@/src/bot/features/remove-message.js';
 import { dashboardFeature } from '@/src/bot/features/reset-message.js';
@@ -69,6 +70,7 @@ export function createBot(
   protectedBot.use(dashboardFeature);
   protectedBot.use(adminFeature);
   protectedBot.use(removeMessageFeature);
+  protectedBot.use(communicationResponseFeature);
   if (isMultipleLocales) protectedBot.use(languageFeature);
 
   // must be the last handler

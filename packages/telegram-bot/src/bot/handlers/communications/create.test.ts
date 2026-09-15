@@ -14,6 +14,7 @@ test('parseCreateCommunicationCommand parses description and message separated b
   assert.deepEqual(parsed, {
     description: 'Maintenance notice',
     message: 'Validators will be monitored.',
+    options: [],
   });
 });
 
@@ -37,4 +38,57 @@ test('parseCreateCommunicationCommand rejects commands with an empty message', (
 
   // This assertion verifies incomplete input is rejected.
   assert.equal(parsed, null);
+});
+
+// Admins turn a communication into a question by appending a third block with
+// the two button labels, written primary first.
+test('parseCreateCommunicationCommand parses the optional button labels', () => {
+  // This input asks users to confirm a migration with an accept and a cancel button.
+  const commandText =
+    '/create_communication Cluster migration >> Do we migrate your cluster? >> Aceptar | Cancelar';
+
+  // This call extracts the message plus the labels the keyboard will render.
+  const parsed = parseCreateCommunicationCommand(commandText);
+
+  // This assertion verifies the options keep the order the admin wrote, which is
+  // the semantic order stored in the database: index 0 is the primary action.
+  assert.deepEqual(parsed, {
+    description: 'Cluster migration',
+    message: 'Do we migrate your cluster?',
+    options: ['Aceptar', 'Cancelar'],
+  });
+});
+
+// The separator is also valid message content, so a trailing block only becomes
+// options when it really looks like a two label list.
+test('parseCreateCommunicationCommand keeps a trailing block as message when it is not a label pair', () => {
+  // This message quotes the separator and would break if the parser split blindly.
+  const commandText = '/create_communication Release notes >> New dashboard >> read the changelog';
+
+  // This call must treat everything after the first separator as the message.
+  const parsed = parseCreateCommunicationCommand(commandText);
+
+  // This assertion verifies no buttons are configured and no text is lost.
+  assert.deepEqual(parsed, {
+    description: 'Release notes',
+    message: 'New dashboard >> read the changelog',
+    options: [],
+  });
+});
+
+// A half written options block is a typo, not a request for one button, so the
+// whole block stays part of the message rather than silently creating a keyboard.
+test('parseCreateCommunicationCommand rejects an options block with an empty label', () => {
+  // This input leaves the second label empty after the pipe.
+  const commandText = '/create_communication Survey >> Do you like it? >> Si |';
+
+  // This call decides between options and plain message content.
+  const parsed = parseCreateCommunicationCommand(commandText);
+
+  // This assertion verifies the malformed block is preserved as message text.
+  assert.deepEqual(parsed, {
+    description: 'Survey',
+    message: 'Do you like it? >> Si |',
+    options: [],
+  });
 });

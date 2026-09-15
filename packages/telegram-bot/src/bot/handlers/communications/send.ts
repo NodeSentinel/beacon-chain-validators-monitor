@@ -1,6 +1,8 @@
 import { InlineKeyboard } from 'grammy';
 
 import type { CommandContext } from 'grammy';
+import { parseCommunicationIdArgument } from './command-id.js';
+import { buildCommunicationOptionsKeyboard } from './options.js';
 import { countBatchDeliveryResults, splitRecipientsIntoBatches } from './send-batches.js';
 
 import { COMMON_REQUESTS_TELEGRAM_ID, getRpcClientForUser } from '@/src/api/client.js';
@@ -9,24 +11,10 @@ import type { Context } from '@/src/bot/context.js';
 import { sendMessage } from '@/src/telegram/messaging.js';
 
 /**
- * Parses the communication id from the /send_communication command text.
- */
-function parseCommunicationId(text: string | undefined): number | null {
-  if (!text) return null;
-
-  const [, rawId] = text.trim().split(/\s+/, 2);
-  if (!rawId) return null;
-
-  const communicationId = Number.parseInt(rawId, 10);
-
-  return Number.isSafeInteger(communicationId) && communicationId > 0 ? communicationId : null;
-}
-
-/**
  * Sends one stored communication to its resolved audience.
  */
 export async function sendCommunicationHandler(ctx: CommandContext<Context>) {
-  const communicationId = parseCommunicationId(ctx.message?.text);
+  const communicationId = parseCommunicationIdArgument(ctx.message?.text);
 
   if (!communicationId) {
     return ctx.reply('Usage: /send_communication <id>');
@@ -51,8 +39,12 @@ export async function sendCommunicationHandler(ctx: CommandContext<Context>) {
     return ctx.reply('already sent');
   }
 
-  // Reuse the legacy dismiss button so every user can remove the broadcast locally.
-  const dismissKeyboard = new InlineKeyboard().text('Dismiss', 'remove_message');
+  // Communications with options ask for an answer; the rest keep the legacy
+  // dismiss button so every user can remove the broadcast locally.
+  const keyboard =
+    communication.options.length > 0
+      ? buildCommunicationOptionsKeyboard(communication.id, communication.options)
+      : new InlineKeyboard().text('Dismiss', 'remove_message');
 
   let sentCount = 0;
   let failedCount = 0;
@@ -69,7 +61,7 @@ export async function sendCommunicationHandler(ctx: CommandContext<Context>) {
           logger: ctx.logger,
           options: {
             link_preview_options: { is_disabled: true },
-            reply_markup: dismissKeyboard,
+            reply_markup: keyboard,
           },
         });
 
